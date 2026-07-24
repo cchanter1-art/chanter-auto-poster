@@ -212,10 +212,10 @@ function createBatchService(dependencies = {}) {
   async function createBatch(context, input = {}) {
     const files = Array.isArray(input.files) ? input.files.filter(Boolean) : [];
     if (files.length === 0) {
-      throw new BatchServiceError('Upload at least one video to create a batch.');
+      throw new BatchServiceError('Upload at least one video or image to create a batch.');
     }
     if (files.length > settings.maxItems) {
-      throw new BatchServiceError(`A batch can contain at most ${settings.maxItems} videos.`, {
+      throw new BatchServiceError(`A batch can contain at most ${settings.maxItems} items.`, {
         code: 'batch_too_large'
       });
     }
@@ -343,6 +343,9 @@ function createBatchService(dependencies = {}) {
           soundModes: Object.fromEntries(
             providerDestinations.map((dest) => [dest.accountId, dest.soundMode])
           ),
+          // Batch intake is the one path that admits images alongside video;
+          // the flag threads through media validation and the storage write.
+          allowImageMedia: true,
           files,
           caption: String(input.caption || ''),
           hashtags: String(input.hashtags || ''),
@@ -476,10 +479,32 @@ function createBatchService(dependencies = {}) {
     return { outcome: 'processed', ok: result.ok };
   }
 
+  // Classify a batch item without trusting a filename over the canonical field.
+  // mediaType is authoritative (storage stamps 'photo'/'video' from the upload
+  // MIME); a video is only ever diverted to the image path if its OWN mediaType
+  // says photo, so legacy video preparation is bit-for-bit unchanged.
+  function isPhotoItem(post) {
+    const mediaType = String(post.mediaType || '').toLowerCase();
+    if (mediaType === 'photo') return true;
+    if (mediaType === 'video') return false;
+    const name = String(post.fileName || post.originalName || '').toLowerCase();
+    const looksVideo = ['.mp4', '.mov', '.webm'].some((ext) => name.endsWith(ext));
+    return !looksVideo && ['.jpg', '.jpeg', '.png', '.webp'].some((ext) => name.endsWith(ext));
+  }
+
   async function generateItemCopy(post) {
     const mediaUrl = String(post.mediaUrl || '').trim();
     if (!mediaUrl) {
       return { ok: false, error: 'The item has no durable media URL to analyze.' };
+    }
+    // Image-safe preparation: this task adds no image caption model, so a photo
+    // item is NOT downloaded and NEVER routed through video-only ffprobe /
+    // frame / audio analysis. Preparation succeeds truthfully with no generated
+    // copy — the operator's manual caption/hashtags are preserved untouched
+    // (a captionless item then simply shows as needs_attention in review). The
+    // batch always progresses even when no automatic image caption exists.
+    if (isPhotoItem(post)) {
+      return { ok: true, caption: '', hashtags: '', provider: '', fallbackUsed: false, mediaKind: 'photo' };
     }
     const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'chanter-batch-'));
     const extension = path.extname(String(post.fileName || '')).toLowerCase() || '.mp4';

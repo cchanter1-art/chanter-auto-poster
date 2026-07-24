@@ -18,7 +18,9 @@ const { uploadMediaFile, destroyMediaAsset, checkCloudinaryHealth } = require('.
 const {
   VIDEO_ONLY_UPLOAD_MESSAGE,
   VIDEO_ONLY_URL_MESSAGE,
+  BATCH_MEDIA_UPLOAD_MESSAGE,
   isVideoUploadFile,
+  isSupportedBatchUploadFile,
   isVideoMediaUrl
 } = require('./mediaPolicy');
 const providers = require('./providers');
@@ -1270,12 +1272,18 @@ async function addUploadedPosts(userId, files, defaults = {}) {
     throw error;
   }
   const uploadFiles = Array.isArray(files) ? files : [];
-  // Video-only intake (defense in depth behind the route-level multer
-  // filters and URL checks): no creation path may mint a new photo job.
-  // Existing photo jobs are untouched — this guards writes only.
+  // Media intake chokepoint (defense in depth behind the route-level multer
+  // filters and URL checks). Default: video-only — no ordinary creation path
+  // may mint a new photo job. The Platform BATCH fan-out opts in explicitly
+  // (defaults.allowImageMedia) to also admit supported images; every other
+  // caller stays video-only. Existing photo jobs are untouched — this guards
+  // writes only.
+  const allowImageMedia = defaults.allowImageMedia === true;
+  const isFileAccepted = allowImageMedia ? isSupportedBatchUploadFile : isVideoUploadFile;
+  const uploadRejectMessage = allowImageMedia ? BATCH_MEDIA_UPLOAD_MESSAGE : VIDEO_ONLY_UPLOAD_MESSAGE;
   for (const file of uploadFiles) {
-    if (!isVideoUploadFile(file)) {
-      const error = new Error(VIDEO_ONLY_UPLOAD_MESSAGE);
+    if (!isFileAccepted(file)) {
+      const error = new Error(uploadRejectMessage);
       error.status = 400;
       throw error;
     }

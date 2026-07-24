@@ -16,21 +16,36 @@ const config = require('./config');
 const applicationService = require('./autoposterApplicationService');
 const batchService = require('./batchService');
 const { requireAdminApi, requireAdminPage, resolveUserId } = require('./auth');
-const { isVideoUploadFile, VIDEO_ONLY_UPLOAD_MESSAGE } = require('./mediaPolicy');
+const { isSupportedBatchUploadFile, BATCH_MEDIA_UPLOAD_MESSAGE } = require('./mediaPolicy');
 
 const router = express.Router();
+
+// Batch intake accepts video AND image sources (opt-in image media lives only
+// on this path). The stored-filename extension must reflect the real media
+// type: an image saved with a fabricated .mp4 name would be misclassified as a
+// video by the provider's filename fallback (tiktok.isVideoPost).
+function batchUploadExtension(file) {
+  const explicit = path.extname(file.originalname || '').toLowerCase();
+  if (explicit) return explicit;
+  const mime = String(file.mimetype || '').toLowerCase();
+  if (mime === 'image/jpeg') return '.jpg';
+  if (mime === 'image/png') return '.png';
+  if (mime === 'image/webp') return '.webp';
+  if (mime === 'video/quicktime') return '.mov';
+  if (mime === 'video/webm') return '.webm';
+  return mime.startsWith('image/') ? '.jpg' : '.mp4';
+}
 
 const batchUpload = multer({
   storage: multer.diskStorage({
     destination: config.uploadsDir,
     filename: (req, file, callback) => {
-      const extension = path.extname(file.originalname || '').toLowerCase() || '.mp4';
-      callback(null, `batch-${Date.now()}-${randomUUID()}${extension}`);
+      callback(null, `batch-${Date.now()}-${randomUUID()}${batchUploadExtension(file)}`);
     }
   }),
   fileFilter: (req, file, callback) => {
-    if (isVideoUploadFile(file)) { callback(null, true); return; }
-    const error = new Error(VIDEO_ONLY_UPLOAD_MESSAGE);
+    if (isSupportedBatchUploadFile(file)) { callback(null, true); return; }
+    const error = new Error(BATCH_MEDIA_UPLOAD_MESSAGE);
     error.status = 400;
     callback(error);
   },

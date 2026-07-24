@@ -12,9 +12,16 @@
 const path = require('path');
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.webm'];
+// Image support is scoped to the Platform BATCH intake path only (opt-in via
+// isSupportedBatchUploadFile). These are the formats the storage layer already
+// encodes and mime-maps (defaultExtension / getPublicMediaMimeType) and that
+// TikTok's Photo Direct Post accepts. Classic/single-post, client-portal, and
+// runtime intake stay strictly video-only through isVideoUploadFile below.
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 const VIDEO_ONLY_UPLOAD_MESSAGE = 'TikTok posting is video-only. Upload an MP4, MOV, or WebM video.';
 const VIDEO_ONLY_URL_MESSAGE = 'TikTok posting is video-only. The Public Media URL must point directly to an MP4, MOV, or WebM video file.';
+const BATCH_MEDIA_UPLOAD_MESSAGE = 'Batch posting accepts a video (MP4, MOV, WebM) or an image (JPG, PNG, WebP).';
 
 function isVideoUploadFile(file) {
   const mime = String((file && file.mimetype) || '').toLowerCase();
@@ -29,6 +36,27 @@ function isVideoUploadFile(file) {
   return VIDEO_EXTENSIONS.includes(extension);
 }
 
+// Image counterpart of isVideoUploadFile, with the SAME strictness: MIME and
+// extension must agree, a missing extension is forgiven for a real image MIME,
+// and a generic MIME is trusted only with a known image extension. A
+// video/image cross-mismatch (e.g. image MIME + .mp4, or video MIME + .png) is
+// rejected by both predicates, so it can never sneak in as "supported".
+function isImageUploadFile(file) {
+  const mime = String((file && file.mimetype) || '').toLowerCase();
+  const extension = path.extname((file && file.originalname) || '').toLowerCase();
+  if (mime.startsWith('video/')) return false;
+  if (mime.startsWith('image/')) return !extension || IMAGE_EXTENSIONS.includes(extension);
+  return IMAGE_EXTENSIONS.includes(extension);
+}
+
+// The ONLY widened acceptance predicate, used exclusively by the opt-in batch
+// path (platform multer filter, validateMedia when allowImageMedia, and the
+// storage chokepoint when defaults.allowImageMedia). A batch source is valid if
+// it is a supported video OR a supported image.
+function isSupportedBatchUploadFile(file) {
+  return isVideoUploadFile(file) || isImageUploadFile(file);
+}
+
 function isVideoMediaUrl(mediaUrl) {
   try {
     const pathname = new URL(String(mediaUrl || '')).pathname.toLowerCase();
@@ -40,8 +68,12 @@ function isVideoMediaUrl(mediaUrl) {
 
 module.exports = {
   VIDEO_EXTENSIONS,
+  IMAGE_EXTENSIONS,
   VIDEO_ONLY_UPLOAD_MESSAGE,
   VIDEO_ONLY_URL_MESSAGE,
+  BATCH_MEDIA_UPLOAD_MESSAGE,
   isVideoUploadFile,
+  isImageUploadFile,
+  isSupportedBatchUploadFile,
   isVideoMediaUrl
 };

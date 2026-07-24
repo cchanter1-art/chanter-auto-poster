@@ -596,6 +596,13 @@ function createAutoPosterApplicationService(dependencies = {}) {
 
   function validateMedia(contextInput, input = {}) {
     createExecutionContext(contextInput);
+    // Opt-in image acceptance for the Platform BATCH fan-out only. Every other
+    // caller (classic/single intake, client portal, runtime control) omits this
+    // flag and therefore stays strictly video-only. Public-URL intake remains
+    // video-only regardless: the batch path uploads files, never URLs.
+    const allowImageMedia = input.allowImageMedia === true;
+    const isFileAccepted = allowImageMedia ? policy.isSupportedBatchUploadFile : policy.isVideoUploadFile;
+    const uploadRejectMessage = allowImageMedia ? policy.BATCH_MEDIA_UPLOAD_MESSAGE : policy.VIDEO_ONLY_UPLOAD_MESSAGE;
     const mediaUrl = String(input.mediaUrl || input.publicMediaUrl || '').trim();
     const providedFiles = Array.isArray(input.files) ? input.files.filter(Boolean) : [];
     const standaloneFile = input.fileName || input.mimeType
@@ -608,8 +615,10 @@ function createAutoPosterApplicationService(dependencies = {}) {
     }
 
     const contract = {
-      videoOnly: true,
-      allowedExtensions: policy.VIDEO_EXTENSIONS,
+      videoOnly: !allowImageMedia,
+      allowedExtensions: allowImageMedia
+        ? [...policy.VIDEO_EXTENSIONS, ...policy.IMAGE_EXTENSIONS]
+        : policy.VIDEO_EXTENSIONS,
       validator: 'mediaPolicy.js'
     };
     const rejected = (rejectionCode, reason) => ({
@@ -630,15 +639,15 @@ function createAutoPosterApplicationService(dependencies = {}) {
     }
 
     for (const file of files) {
-      if (!policy.isVideoUploadFile(file)) {
+      if (!isFileAccepted(file)) {
         return rejected(
           uploadRejectionCode(file.originalname, file.mimetype),
-          policy.VIDEO_ONLY_UPLOAD_MESSAGE
+          uploadRejectMessage
         );
       }
     }
 
-    return { valid: true, classification: 'video', policy: contract };
+    return { valid: true, classification: allowImageMedia ? 'media' : 'video', policy: contract };
   }
 
   async function listQueue(contextInput, input = {}) {
@@ -1109,9 +1118,14 @@ function createAutoPosterApplicationService(dependencies = {}) {
     });
     if (!authorization.decision.allowed) throw denialError(authorization.decision);
 
+    // Image media is admitted only on the explicit batch fan-out path; the
+    // flag flows into media validation and the storage chokepoint together so
+    // the two can never drift apart.
+    const allowImageMedia = input.allowImageMedia === true;
     const media = validateMedia(context, {
       files: input.files,
-      mediaUrl: input.mediaUrl || input.publicMediaUrl
+      mediaUrl: input.mediaUrl || input.publicMediaUrl,
+      allowImageMedia
     });
     if (!media.valid) throw new AutoPosterApplicationError(media.reason);
     const providerProofMode = provider === PROVIDER_YOUTUBE && input.providerProofMode === true;
@@ -1183,6 +1197,9 @@ function createAutoPosterApplicationService(dependencies = {}) {
       // Platform batch link: stamps batchId/batchOrder/preparation on every
       // created item so the batch runner can claim preparation work.
       batchId: String(input.batchId || '').trim(),
+      // Carries the batch path's image opt-in through to the storage write
+      // chokepoint (defense in depth: storage re-validates every source file).
+      allowImageMedia,
       documentId: deterministicId,
       createOnly: Boolean(deterministicId),
       workspaceId: commercialContext.workspace.workspaceId,

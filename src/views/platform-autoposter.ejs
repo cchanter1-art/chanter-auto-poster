@@ -40,9 +40,9 @@
       <div class="panel">
         <form id="batch-form">
           <div id="dropzone" class="dropzone">
-            <div class="dz-primary">Σύρετε βίντεο εδώ ή κάντε κλικ για επιλογή</div>
-            <div class="dz-secondary">MP4, MOV ή WebM &middot; έως <%= batchDefaults.maxItems %> βίντεο &middot; έως 250MB το καθένα</div>
-            <input id="file-input" type="file" name="videos" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" multiple style="display:none">
+            <div class="dz-primary">Σύρετε βίντεο ή εικόνες εδώ ή κάντε κλικ για επιλογή</div>
+            <div class="dz-secondary">Βίντεο (MP4, MOV, WebM) ή εικόνες (JPG, PNG, WebP) &middot; έως <%= batchDefaults.maxItems %> αρχεία &middot; έως 250MB το καθένα</div>
+            <input id="file-input" type="file" name="videos" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple style="display:none">
           </div>
           <ul id="file-list" class="file-list"></ul>
 
