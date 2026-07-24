@@ -1,9 +1,24 @@
 const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
+const { randomUUID } = require('crypto');
 const config = require('./config');
 const storage = require('./storage');
+const { resolveSoundCapability } = require('./tiktokSoundMode');
+const { deriveMutedVideo } = require('./autoMusic');
 
 const tokenRefreshBufferMs = 5 * 60 * 1000;
+
+// Honest capability result for a directly published video whose destination
+// selected TikTok-recommended sound. TikTok's video DIRECT_POST API exposes no
+// automatic recommended-sound switch, so this fails clearly (manual completion)
+// rather than silently claiming a native sound was applied. The code is not in
+// the scheduler's transient set, so the outcome is terminal (no blind retry).
+const SOUND_MODE_MANUAL_CODE = 'SOUND_MODE_MANUAL_REQUIRED';
+const SOUND_MODE_MANUAL_REASON =
+  'TikTok does not support automatically adding recommended sound to a directly '
+  + 'published video. Choose Original or Muted for automatic posting, or finish '
+  + 'sound selection manually in the TikTok app.';
 const videoInitUrl = 'https://open.tiktokapis.com/v2/post/publish/video/init/';
 const creatorInfoQueryUrl = 'https://open.tiktokapis.com/v2/post/publish/creator_info/query/';
 const MIN_CHUNK_SIZE = 5 * 1024 * 1024;
@@ -158,6 +173,19 @@ async function publishPhotoPost(post) {
     };
   }
 
+  // Destination-level sound mode is resolved here, at the provider boundary,
+  // from the fanned-out post's own soundMode. A video that asked for TikTok
+  // recommended sound cannot be auto-published honestly, so refuse before any
+  // external call (no creator-info query, no init).
+  if (isVideoPost(post) && resolveSoundCapability(post.mediaType, post.soundMode).manualCompletionRequired) {
+    return {
+      ok: false,
+      mode: 'manual',
+      code: SOUND_MODE_MANUAL_CODE,
+      reason: SOUND_MODE_MANUAL_REASON
+    };
+  }
+
   const creatorInfo = await queryCreatorInfoForPublish(auth.access_token);
 
   if (isVideoPost(post)) {
@@ -186,7 +214,14 @@ function isVideoPost(post) {
 }
 
 async function publishVideoPost(post, accessToken, creatorInfo = null) {
-  const source = await getVideoSource(post);
+  // Destination-level sound mode: `mute` uploads a muted derivative of the
+  // canonical asset; keep_original uploads the asset unchanged. The muted copy
+  // is a throwaway temp file (source.cleanup removes it) — the stored asset is
+  // never mutated.
+  const capability = resolveSoundCapability(post.mediaType, post.soundMode);
+  const source = capability.requiresMutedDerivative
+    ? await getMutedVideoSource(post)
+    : await getVideoSource(post);
   if (!source.ok) return source;
 
   const fileSize = source.fileSize;
@@ -242,6 +277,109 @@ async function cancelVideoSource(source) {
   } catch (error) {
     // The upload may already own or have consumed the stream.
   }
+  // Remove any temp files a derived (muted) source materialized. Runs on every
+  // publish path — success, init failure, and upload failure all reach here.
+  if (typeof source.cleanup === 'function') {
+    try {
+      await source.cleanup();
+    } catch (error) {
+      // Best-effort cleanup must never mask the real publish result.
+    }
+  }
+}
+
+// Bring the canonical video to a local file so it can be muted. A durable local
+// upload is used in place (never deleted); a remote asset is downloaded to a
+// temp file the caller owns. The canonical stored asset is never modified.
+async function materializeLocalVideo(post) {
+  const localPath = getLocalMediaPath(post);
+  if (localPath) {
+    try {
+      const stats = fs.statSync(localPath);
+      if (stats.isFile() && stats.size > 0) {
+        return { ok: true, path: localPath, cleanup: async () => {} };
+      }
+    } catch (error) {
+      // Render restarts wipe local uploads. Fall through to the durable URL.
+    }
+  }
+
+  const remoteUrl = getRemoteMediaUrl(post);
+  if (!remoteUrl) {
+    return {
+      ok: false,
+      mode: 'manual',
+      reason: localPath ? `Video file not found: ${path.basename(localPath)}` : 'Video media URL missing'
+    };
+  }
+
+  const extension = safeVideoExtension(remoteUrl);
+  const tempPath = path.join(config.uploadsDir, `tiktok-src-${randomUUID()}${extension}`);
+  try {
+    const response = await fetch(remoteUrl, { signal: requestSignal(config.tiktok.uploadTimeoutMs) });
+    if (!response.ok) {
+      return { ok: false, mode: 'api', reason: `Video media download returned HTTP ${response.status}` };
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length === 0) {
+      return { ok: false, mode: 'api', reason: 'Video file is empty' };
+    }
+    await fsp.mkdir(config.uploadsDir, { recursive: true });
+    await fsp.writeFile(tempPath, buffer);
+    return { ok: true, path: tempPath, cleanup: async () => { await fsp.rm(tempPath, { force: true }); } };
+  } catch (error) {
+    await fsp.rm(tempPath, { force: true }).catch(() => {});
+    return { ok: false, mode: 'api', reason: `Could not load video media: ${error.message}` };
+  }
+}
+
+// A ready-to-upload source pointing at a muted derivative of the canonical
+// video. Mirrors getVideoSource's local-file shape so uploadVideoFile treats it
+// identically; cleanup removes both any downloaded source and the muted copy.
+async function getMutedVideoSource(post) {
+  const input = await materializeLocalVideo(post);
+  if (!input.ok) return input;
+
+  const extension = safeVideoExtension(input.path);
+  const mutedPath = path.join(config.uploadsDir, `tiktok-muted-${randomUUID()}${extension}`);
+  try {
+    await fsp.mkdir(config.uploadsDir, { recursive: true });
+    await deriveMutedVideo(input.path, mutedPath);
+  } catch (error) {
+    await input.cleanup();
+    await fsp.rm(mutedPath, { force: true }).catch(() => {});
+    return { ok: false, mode: 'api', reason: `Could not mute the video for TikTok: ${error.message}` };
+  }
+
+  let stats;
+  try {
+    stats = fs.statSync(mutedPath);
+  } catch (error) {
+    await input.cleanup();
+    return { ok: false, mode: 'api', reason: 'The muted video could not be read after rendering.' };
+  }
+
+  return {
+    ok: true,
+    source: 'local',
+    videoPath: mutedPath,
+    fileSize: stats.size,
+    cleanup: async () => {
+      await input.cleanup();
+      await fsp.rm(mutedPath, { force: true }).catch(() => {});
+    }
+  };
+}
+
+function safeVideoExtension(value) {
+  let candidate = '';
+  try {
+    candidate = path.extname(new URL(value).pathname);
+  } catch (error) {
+    candidate = path.extname(String(value || ''));
+  }
+  const normalized = String(candidate || '').toLowerCase();
+  return ['.mp4', '.mov', '.webm'].includes(normalized) ? normalized : '.mp4';
 }
 
 async function getVideoSource(post) {
@@ -651,13 +789,18 @@ function getRemoteMediaUrl(post) {
 }
 
 function buildPhotoPayload(post, imageUrl, creatorInfo = null) {
+  // Destination-level sound mode for a photo post. A photo carries no source
+  // audio, so keep_original and mute are both silent (auto_add_music:false);
+  // only tiktok_recommended asks TikTok to add a recommended track.
+  const capability = resolveSoundCapability('photo', post && post.soundMode);
   return {
     post_info: {
       title: buildCaption(post),
       privacy_level: resolvePrivacyLevel(post, creatorInfo),
       disable_duet:    true,  // Not applicable for photo posts per TikTok guidelines
       disable_comment: Boolean(post.disableComment),
-      disable_stitch:  true   // Not applicable for photo posts per TikTok guidelines
+      disable_stitch:  true,  // Not applicable for photo posts per TikTok guidelines
+      auto_add_music:  capability.autoAddMusic
     },
     source_info: {
       source: 'PULL_FROM_URL',

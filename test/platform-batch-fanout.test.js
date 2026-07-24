@@ -99,8 +99,8 @@ function makeWorld({ nowMs = BASE_NOW, failSchedulePostForProvider = null } = {}
       // `accountId` alone is only the legacy single-account fallback.
       const targets = Array.isArray(defaults.accounts) && defaults.accounts.length > 0
         ? defaults.accounts
-        : [{ accountId: defaults.accountId, tiktokOpenId: defaults.tiktokOpenId, username: defaults.username }];
-      calls.add.push({ userId, provider: defaults.provider, accountIds: targets.map((t) => t.accountId), files });
+        : [{ accountId: defaults.accountId, tiktokOpenId: defaults.tiktokOpenId, username: defaults.username, soundMode: defaults.soundMode }];
+      calls.add.push({ userId, provider: defaults.provider, accountIds: targets.map((t) => t.accountId), soundModes: targets.map((t) => t.soundMode), files });
       const sources = Array.isArray(files) && files.length > 0 ? files : [null];
       const created = [];
       for (const target of targets) {
@@ -123,6 +123,7 @@ function makeWorld({ nowMs = BASE_NOW, failSchedulePostForProvider = null } = {}
               cloudinaryPublicId: `cld-${target.accountId}-${file ? file.originalname : 'url'}`,
               caption: defaults.caption,
               hashtags: defaults.hashtags,
+              soundMode: target.soundMode,
               scheduledAt: null,
               status: 'pending',
               approvedAt: null,
@@ -463,6 +464,58 @@ test('independent approval + independent failure: accepting together keeps synch
   const view = await world.batchService.getBatchView(websiteContext(), result.batch.batchId);
   assert.equal(view.items.find((item) => item.id === copyA.id).approved, true);
   assert.equal(view.items.find((item) => item.id === copyB.id).approved, false);
+});
+
+test('two accounts sharing one canonical asset persist independent sound modes', async () => {
+  const world = makeWorld();
+  const result = await world.batchService.createBatch(websiteContext(), {
+    ...FANOUT_INTAKE,
+    intakeKey: 'fanout-sound-1',
+    destinations: [
+      { provider: 'tiktok', accountId: 'account-a', soundMode: 'mute' },
+      { provider: 'tiktok', accountId: 'account-b', soundMode: 'tiktok_recommended' }
+    ],
+    files: [uploadFile('a.mp4')]
+  });
+  assert.equal(result.items.length, 2);
+
+  const byAccount = new Map(result.items.map((item) => [item.accountId, item]));
+  // Same source video (one sourceIndex, one synchronized slot) but each
+  // destination keeps its OWN sound mode.
+  assert.equal(new Set(result.items.map((item) => item.sourceIndex)).size, 1);
+  assert.equal(byAccount.get('account-a').soundMode, 'mute');
+  assert.equal(byAccount.get('account-b').soundMode, 'tiktok_recommended');
+});
+
+test('fan-out preserves each destination sound mode independently across N x M', async () => {
+  const world = makeWorld();
+  const result = await world.batchService.createBatch(websiteContext(), {
+    ...FANOUT_INTAKE,
+    intakeKey: 'fanout-sound-2',
+    destinations: [
+      { provider: 'tiktok', accountId: 'account-a', soundMode: 'keep_original' },
+      { provider: 'tiktok', accountId: 'account-b', soundMode: 'mute' }
+    ],
+    files: [uploadFile('a.mp4'), uploadFile('b.mp4')]
+  });
+  assert.equal(result.items.length, 4);
+
+  // Every copy for account-a keeps keep_original; every copy for account-b
+  // keeps mute — regardless of which source video it came from.
+  for (const item of result.items) {
+    const expected = item.accountId === 'account-a' ? 'keep_original' : 'mute';
+    assert.equal(item.soundMode, expected, `${item.accountId} copy should stay ${expected}`);
+  }
+
+  // An unspecified destination defaults safely to keep_original.
+  const world2 = makeWorld();
+  const defaulted = await world2.batchService.createBatch(websiteContext(), {
+    ...FANOUT_INTAKE,
+    intakeKey: 'fanout-sound-default',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('a.mp4')]
+  });
+  assert.equal(defaulted.items[0].soundMode, 'keep_original');
 });
 
 test('independent delete: deleting one destination copy leaves its sibling intact with its own media', async () => {

@@ -50,13 +50,24 @@
           <p class="section-note">Επιλέξτε έναν ή περισσότερους συνδεδεμένους λογαριασμούς. Κάθε βίντεο θα δημιουργήσει ένα ξεχωριστό, ανεξάρτητο προσχέδιο για κάθε προορισμό.</p>
           <div id="destination-list" class="destination-list">
             <% for (const dest of destinations) { %>
-              <label class="destination-item">
-                <input type="checkbox" class="destination-checkbox" value="<%= dest.provider %>|<%= dest.accountId %>" data-provider="<%= dest.provider %>" data-account-id="<%= dest.accountId %>">
-                <span class="destination-provider"><%= dest.providerDisplayName || dest.provider %></span>
-                <span class="destination-label"><%= dest.label %></span>
-              </label>
+              <div class="destination-item">
+                <label class="destination-main" style="display:flex;align-items:center;gap:9px;flex:1;min-width:0;margin:0;cursor:pointer">
+                  <input type="checkbox" class="destination-checkbox" value="<%= dest.provider %>|<%= dest.accountId %>" data-provider="<%= dest.provider %>" data-account-id="<%= dest.accountId %>">
+                  <span class="destination-provider"><%= dest.providerDisplayName || dest.provider %></span>
+                  <span class="destination-label"><%= dest.label %></span>
+                </label>
+                <select class="destination-sound" data-account-id="<%= dest.accountId %>" aria-label="Ήχος · Sound" title="Ήχος · Sound" style="font-size:12px;padding:2px 4px;border-radius:6px">
+                  <option value="keep_original">Αρχικός · Original</option>
+                  <option value="mute">Χωρίς ήχο · Muted</option>
+                  <option value="tiktok_recommended">Ήχος TikTok · TikTok sound</option>
+                </select>
+              </div>
             <% } %>
           </div>
+          <p id="sound-note" class="section-note hidden" style="color:var(--accent)">
+            «Ήχος TikTok» για βίντεο δεν δημοσιεύεται αυτόματα — απαιτεί ολοκλήρωση μέσα στην εφαρμογή TikTok. Επιλέξτε «Αρχικός» ή «Χωρίς ήχο» για αυτόματη δημοσίευση.
+            &middot; “TikTok sound” for video isn’t posted automatically — it needs manual completion in the TikTok app. Choose “Original” or “Muted” for automatic posting.
+          </p>
 
           <h3 class="section-title">Χρονοδιάγραμμα &middot; Scheduling</h3>
           <div class="mode-tabs" id="mode-tabs">
@@ -265,6 +276,7 @@
 
       // ── Destinations ──
       var destinationCheckboxes = Array.prototype.slice.call(document.querySelectorAll('.destination-checkbox'));
+      var soundNote = document.getElementById('sound-note');
       destinationCheckboxes.forEach(function (box) {
         box.addEventListener('change', function () {
           var checkedCount = destinationCheckboxes.filter(function (b) { return b.checked; }).length;
@@ -275,10 +287,31 @@
           updatePreview();
         });
       });
+      // Per-destination sound control. Selecting "TikTok sound" for a video
+      // (batch intake is video-only) can't be auto-published, so surface the
+      // honest manual-completion note whenever a chosen destination uses it.
+      Array.prototype.slice.call(document.querySelectorAll('.destination-sound')).forEach(function (select) {
+        select.addEventListener('change', updateSoundNote);
+      });
       function selectedDestinations() {
         return destinationCheckboxes
           .filter(function (box) { return box.checked; })
-          .map(function (box) { return { provider: box.dataset.provider, accountId: box.dataset.accountId }; });
+          .map(function (box) {
+            var row = box.closest('.destination-item');
+            var soundSelect = row ? row.querySelector('.destination-sound') : null;
+            return {
+              provider: box.dataset.provider,
+              accountId: box.dataset.accountId,
+              soundMode: soundSelect ? soundSelect.value : 'keep_original'
+            };
+          });
+      }
+      function updateSoundNote() {
+        if (!soundNote) return;
+        var needsManual = selectedDestinations().some(function (dest) {
+          return dest.soundMode === 'tiktok_recommended';
+        });
+        soundNote.classList.toggle('hidden', !needsManual);
       }
 
       // ── Scheduling mode tabs ──
@@ -375,6 +408,7 @@
         submitBtn.textContent = sourceCount > 0
           ? 'Δημιουργία παρτίδας (' + sourceCount + ' βίντεο)'
           : 'Δημιουργία παρτίδας';
+        updateSoundNote();
       }
       updatePreview();
 

@@ -23,6 +23,7 @@ const defaultAutoCaption = require('./autoCaption');
 const defaultApplicationService = require('./autoposterApplicationService');
 const { computeBatchSchedulePlan } = require('./maxScheduler');
 const providers = require('./providers');
+const { normalizeSoundMode } = require('./tiktokSoundMode');
 
 // Fan-out destination count bound. Source-video count is already bounded by
 // config.batchIntake.maxItems; this guards against an unbounded N x M
@@ -62,7 +63,9 @@ function normalizeDestinations(raw) {
     const key = `${provider}|${accountId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ provider, accountId });
+    // Per-destination sound mode travels with the destination and is validated
+    // to the safe default here so nothing malformed reaches the fan-out.
+    result.push({ provider, accountId, soundMode: normalizeSoundMode(entry.soundMode) });
   }
   return result;
 }
@@ -302,7 +305,7 @@ function createBatchService(dependencies = {}) {
     const byProvider = new Map();
     for (const dest of destinations) {
       if (!byProvider.has(dest.provider)) byProvider.set(dest.provider, []);
-      byProvider.get(dest.provider).push(dest.accountId);
+      byProvider.get(dest.provider).push(dest);
     }
     const singleDestination = destinations.length === 1 ? destinations[0] : null;
 
@@ -331,10 +334,15 @@ function createBatchService(dependencies = {}) {
 
     let createdPosts = [];
     try {
-      for (const [provider, accountIds] of byProvider) {
+      for (const [provider, providerDestinations] of byProvider) {
         const result = await applicationService.schedulePost(context, {
           provider,
-          accountIds,
+          accountIds: providerDestinations.map((dest) => dest.accountId),
+          // Independent sound mode per destination account, preserved through
+          // fan-out so every sibling copy keeps its own choice.
+          soundModes: Object.fromEntries(
+            providerDestinations.map((dest) => [dest.accountId, dest.soundMode])
+          ),
           files,
           caption: String(input.caption || ''),
           hashtags: String(input.hashtags || ''),

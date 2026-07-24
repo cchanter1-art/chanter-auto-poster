@@ -5,6 +5,7 @@ const { Timestamp } = require('./firestore');
 const { sanitizeProviderOperation } = require('./youtubeProviderOperation');
 const { sanitizeApprovedMediaIdentity } = require('./approvedMediaIdentity');
 const { safeDiagnosticText } = require('./forbiddenMaterial');
+const { normalizeSoundMode } = require('./tiktokSoundMode');
 
 const DEFAULT_USER_ID = config.defaultUserId;
 const YOUTUBE_APPROVAL_ATTEMPT_GRANT = 1;
@@ -355,6 +356,10 @@ function postFromDoc(doc) {
     storageFallback: Boolean(data.storageFallback),
     instagramMediaUrl: data.instagramMediaUrl || '',
     privacyLevel: data.privacyLevel || 'SELF_ONLY',
+    // Destination-level TikTok sound mode. Legacy records and any missing or
+    // unknown value resolve to the safe default (keep_original), preserving
+    // the exact pre-feature publish behavior.
+    soundMode: normalizeSoundMode(data.soundMode),
     scheduledAt: toIsoOrNull(data.scheduledAt || data.scheduledTimeUTC),
     status: normalizeQueueStatus(data.status),
     // Human-approval gate (see scheduler.js isExplicitlyApproved). A post
@@ -468,6 +473,10 @@ function mapPatchToFirestore(patch) {
   delete result.username;
   delete result.providerMetadata;
   delete result.publishAttemptBudget;
+
+  // Destination-level sound mode stays a validated enum through any generic
+  // edit surface: an unknown value can never reach storage.
+  if ('soundMode' in result) result.soundMode = normalizeSoundMode(result.soundMode);
 
   if ('lastResult' in result) result.lastResult = sanitizePostResult(result.lastResult);
   if ('lastInstagramResult' in result) result.lastInstagramResult = sanitizePostResult(result.lastInstagramResult);

@@ -195,6 +195,40 @@ async function mixBackgroundMusic(videoPath, trackPath, outputPath, metadata = {
   );
 }
 
+/**
+ * Produce a muted derivative of `videoPath` at `outputPath` (destination-level
+ * sound mode: mute). Streams every non-audio track through unchanged (`-c copy`)
+ * and drops audio (`-an`) — a fast remux, no re-encode — so it stays in the
+ * source container and, crucially, never mutates the canonical source: the
+ * output is always a distinct file. Reuses the same ffmpeg resolution and
+ * injectable runCommand as the rest of this module.
+ */
+async function deriveMutedVideo(videoPath, outputPath, options = {}) {
+  if (path.resolve(videoPath) === path.resolve(outputPath)) {
+    throw autoMusicError('Muted derivative must not overwrite its source', 'MUTED_VIDEO_INVALID_TARGET');
+  }
+  const runCommand = options.runCommand || runProcess;
+  await fsp.rm(outputPath, { force: true });
+  await runCommand(
+    options.ffmpegPath || resolveFfmpegPath(),
+    [
+      '-hide_banner', '-loglevel', 'error',
+      '-i', videoPath,
+      '-map', '0',
+      '-c', 'copy',
+      '-an',
+      '-y', outputPath
+    ],
+    { timeoutMs: options.timeoutMs || config.autoMusic.renderTimeoutMs }
+  );
+
+  const stats = await fsp.stat(outputPath);
+  if (!stats.isFile() || stats.size === 0) {
+    throw autoMusicError('FFmpeg did not create a usable muted video', 'MUTED_VIDEO_RENDER_FAILED');
+  }
+  return { outputPath, size: stats.size };
+}
+
 async function prepareAutoMusic({ videoPath, originalName, originalSize, userId, analysis }, options = {}) {
   await fsp.mkdir(config.uploadsDir, { recursive: true });
   await cleanupExpiredPreparedMediaFiles();
@@ -428,6 +462,7 @@ module.exports = {
   loadMusicCatalog,
   selectMusicTrack,
   mixBackgroundMusic,
+  deriveMutedVideo,
   prepareAutoMusic,
   createPreparedMediaToken,
   verifyPreparedMediaToken,

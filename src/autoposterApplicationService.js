@@ -16,6 +16,7 @@ const { parseDateTimeLocal } = require('./timeUtil');
 const { computeMaxSchedulePlan, computeDailySchedulePlan, computeBatchStaggerPlan } = require('./maxScheduler');
 const youtube = require('./youtube');
 const { sanitizeApprovedMediaIdentity } = require('./approvedMediaIdentity');
+const { normalizeSoundMode } = require('./tiktokSoundMode');
 const { validateYouTubeMetadata } = youtube;
 
 const PROVIDER_TIKTOK = providers.PROVIDER_TIKTOK;
@@ -951,6 +952,17 @@ function createAutoPosterApplicationService(dependencies = {}) {
     const commercialContext = await resolveCommercialContext(context);
     const accountIds = normalizeAccountIds(context, input);
     const accounts = await resolveOwnedAccounts(context, accountIds, { provider, commercialContext });
+    // Per-destination sound mode: a map of accountId -> requested mode. Each
+    // resolved account keeps its OWN mode (defaulting safely) so the fan-out
+    // stamps independent sound modes on sibling copies of one canonical asset.
+    const requestedSoundModes = input.soundModes && typeof input.soundModes === 'object'
+      ? input.soundModes
+      : {};
+    const soundModeFor = (accountId) => normalizeSoundMode(
+      Object.prototype.hasOwnProperty.call(requestedSoundModes, accountId)
+        ? requestedSoundModes[accountId]
+        : input.soundMode
+    );
     const sourceCount = Array.isArray(input.files) && input.files.filter(Boolean).length > 0
       ? input.files.filter(Boolean).length
       : 1;
@@ -1125,12 +1137,14 @@ function createAutoPosterApplicationService(dependencies = {}) {
       accounts: accounts.map((account) => ({
         accountId: account.accountId,
         tiktokOpenId: provider === PROVIDER_TIKTOK ? account.open_id : '',
-        username: account.username
+        username: account.username,
+        soundMode: soundModeFor(account.accountId)
       })),
       // Preserve the legacy single-account constructor contract.
       accountId: firstAccount.accountId,
       tiktokOpenId: provider === PROVIDER_TIKTOK ? firstAccount.open_id : '',
       username: firstAccount.username,
+      soundMode: soundModeFor(firstAccount.accountId),
       preparedMedia: input.preparedMedia,
       selfApprove,
       provider,

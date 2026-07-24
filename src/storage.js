@@ -35,6 +35,7 @@ const {
   transitionProviderOperation
 } = require('./youtubeProviderOperation');
 const { sanitizeApprovedMediaIdentity } = require('./approvedMediaIdentity');
+const { normalizeSoundMode } = require('./tiktokSoundMode');
 const {
   DEFAULT_USER_ID,
   postFromDoc,
@@ -1210,7 +1211,8 @@ function normalizeTargetAccounts(defaults, providerId = 'tiktok') {
     : [{
         accountId: defaults.accountId,
         tiktokOpenId: defaults.tiktokOpenId,
-        username: defaults.username || defaults.displayName
+        username: defaults.username || defaults.displayName,
+        soundMode: defaults.soundMode
       }];
 
   const seen = new Set();
@@ -1227,7 +1229,10 @@ function normalizeTargetAccounts(defaults, providerId = 'tiktok') {
       tiktokOpenId: providerId === 'tiktok'
         ? String((raw && (raw.tiktokOpenId || raw.open_id)) || accountId).trim()
         : '',
-      username: String((raw && (raw.username || raw.displayName)) || accountId).trim()
+      username: String((raw && (raw.username || raw.displayName)) || accountId).trim(),
+      // Destination-level TikTok sound mode; validated to the safe default so a
+      // missing or unknown value can never reach a stored post document.
+      soundMode: normalizeSoundMode(raw && raw.soundMode)
     });
   }
   return targets;
@@ -1607,6 +1612,11 @@ async function addUploadedPosts(userId, files, defaults = {}) {
           instagramMediaUrl: String(defaults.instagramMediaUrl || publicMediaUrl).trim(),
           privacyLevel:
             String(defaults.privacyLevel || config.tiktok.privacyLevel || 'SELF_ONLY').trim() || 'SELF_ONLY',
+          // Destination-level TikTok sound mode. Each fanned-out copy of one
+          // canonical asset carries its OWN mode (keep_original | mute |
+          // tiktok_recommended), independent of its siblings; the provider
+          // resolves it at publish. Defaults safely to keep_original.
+          soundMode: normalizeSoundMode(target.soundMode),
           providerMetadata: boundedProviderMetadata(providerId, defaults.providerMetadata),
           scheduledAt: jobScheduledAt,
           status: jobScheduledAt ? 'scheduled' : 'pending',
