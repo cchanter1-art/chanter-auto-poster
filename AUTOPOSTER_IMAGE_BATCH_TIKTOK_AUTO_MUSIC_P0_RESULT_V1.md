@@ -216,9 +216,7 @@ proof is prepared but **not executed** (awaiting explicit authorization):
 
 ## 14. Commit / push status
 
-**Not committed, not pushed** — per instruction, holding for review. Working tree
-has the 7 tracked edits + the new test file (see §1). `firestore-debug.log`
-remains pre-existing untracked and is unrelated to this task.
+**Committed and pushed.** See §16 Closeout. `firestore-debug.log` remains pre-existing, untracked, and excluded.
 
 ## 15. Smallest next live-proof step
 
@@ -227,3 +225,23 @@ TikTok **test** accounts at `SELF_ONLY` (e.g. via `scripts/live-publish-test.js`
 / `src/livePublishTest.js`), capture the returned `publish_id`/status into the
 existing publish-ledger evidence, and confirm `auto_add_music:true` on the photo
 init request — with **no** public visibility transition.
+
+## 16. Closeout
+
+- **Implementation commit:** 43277f6b4ce94977de11aa7e7d5b2b746f6aa8c0
+- **Implementation push:** confirmed to origin/main
+- **Implementation files:**
+
+- AUTOPOSTER_IMAGE_BATCH_TIKTOK_AUTO_MUSIC_P0_RESULT_V1.md
+- package.json
+- src/autoposterApplicationService.js
+- src/batchService.js
+- src/mediaPolicy.js
+- src/platformRoutes.js
+- src/storage.js
+- src/views/platform-autoposter.ejs
+- test/platform-batch-image-intake.test.js
+
+- **TikTok/YouTube live publish:** not executed
+- **Public visibility transition:** not executed
+- **firestore-debug.log:** excluded; remains pre-existing and untracked
