@@ -423,6 +423,8 @@ function postFromDoc(doc) {
     runtimeGraphId: data.runtimeGraphId || '',
     runtimeAction: data.runtimeAction || '',
     runtimePayloadHash: data.runtimePayloadHash || '',
+    approvalId: String(data.approvalId || ''),
+    evidenceBundleId: String(data.evidenceBundleId || ''),
     providerProofMode: data.providerProofMode === true,
     approvedMedia: sanitizeApprovedMediaIdentity(data.approvedMedia),
     // Usage linkage contains identifiers and lifecycle state only. Counter

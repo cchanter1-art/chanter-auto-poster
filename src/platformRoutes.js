@@ -22,6 +22,7 @@ const { randomUUID } = require('crypto');
 const config = require('./config');
 const applicationService = require('./autoposterApplicationService');
 const batchService = require('./batchService');
+const canonicalExecution = require('./platformCanonicalExecution');
 const platformModules = require('./platformModules');
 const platformStatus = require('./platformStatus');
 const platformWorkProviders = require('./platformWorkProviders');
@@ -36,6 +37,7 @@ const maxScheduler = require('./maxScheduler');
 const { groupDestinationsByProvider, countSelectableAccounts } = require('./destinationChips');
 const { requireAdminApi, requireAdminPage, resolveUserId } = require('./auth');
 const { isSupportedBatchUploadFile, BATCH_MEDIA_UPLOAD_MESSAGE } = require('./mediaPolicy');
+const { safeDiagnosticText, sanitizeProviderMaterial } = require('./forbiddenMaterial');
 
 // Every connected, publishing-ready provider is selectable in the canonical
 // composer. YouTube used to be shown grouped-but-disabled because it needs a
@@ -158,13 +160,29 @@ async function removeTemporaryUploads(files) {
 }
 
 function sendServiceError(res, error) {
-  if (error && (error.name === 'BatchServiceError' || error.name === 'AutoPosterApplicationError')) {
-    res.status(error.status || 400).json({
+  const handled = new Set([
+    'BatchServiceError',
+    'AutoPosterApplicationError',
+    'CanonicalExecutionError',
+    'OperatorCommandClientError',
+    'StagedMediaError'
+  ]);
+  if (error && handled.has(error.name)) {
+    const protectedValues = [
+      config.canonicalExecution.submitToken,
+      config.canonicalExecution.controlToken,
+      config.canonicalExecution.mediaReferenceSecret
+    ];
+    const payload = {
       ok: false,
       code: error.code || 'validation_failed',
       reason: error.message,
       details: error.details || {}
-    });
+    };
+    // Preserve the legacy Batch/Application error response exactly; only the
+    // new gateway errors declare retryability.
+    if (typeof error.retryable === 'boolean') payload.retryable = error.retryable;
+    res.status(error.status || 400).json(sanitizeProviderMaterial(payload, { protectedValues }));
     return true;
   }
   return false;
@@ -179,11 +197,16 @@ function sendServiceError(res, error) {
 // Operator registers only when OPERATOR_BASE_URL is configured. Unconfigured is
 // not an outage, so no provider is registered and nothing is claimed.
 const workRegistry = platformWorkProviders.createWorkRegistry();
-workRegistry.register(createAutoPosterWorkProvider());
+workRegistry.register(createAutoPosterWorkProvider({
+  includeCanonicalRuntimeJobs: config.canonicalExecution.enabled
+}));
 // Recurring series occurrences are Release Queue jobs, so they register under
 // the module that owns that surface rather than under AutoPoster.
 workRegistry.register(createRecurringSeriesWorkProvider());
-const operatorWorkProvider = createOperatorWorkProvider(config.operatorWork);
+const operatorWorkProvider = createOperatorWorkProvider({
+  ...config.operatorWork,
+  includeAutoPosterCommands: config.canonicalExecution.enabled
+});
 if (operatorWorkProvider) workRegistry.register(operatorWorkProvider);
 
 // Every shell surface degrades to a partial or empty projection plus a visible
@@ -370,6 +393,38 @@ router.get('/platform/compose', requireAdminPage, asyncRoute(async (req, res) =>
   });
 }));
 
+// Canonical command acknowledgement is a safe read model only. Customer copy
+// stays at the product level: accepted, awaiting human approval, and current
+// product state. Mission graphs, Runtime internals and control actions remain
+// behind Operator.
+router.get('/platform/compose/commands/:commandId', requireAdminPage, asyncRoute(async (req, res) => {
+  let command = null;
+  let commandError = '';
+  try {
+    const linkage = await canonicalExecution.getCommand(req.params.commandId);
+    command = canonicalExecution.safeCommandView(linkage);
+  } catch (error) {
+    commandError = safeDiagnosticText(
+      (error && error.message) || 'Canonical work is temporarily unavailable.',
+      {
+        protectedValues: [
+          config.canonicalExecution.submitToken,
+          config.canonicalExecution.controlToken,
+          config.canonicalExecution.mediaReferenceSecret
+        ]
+      }
+    );
+  }
+  res.set('Cache-Control', 'no-store');
+  res.render('platform-command', {
+    appName: config.appName,
+    active: 'compose',
+    commandId: String(req.params.commandId || ''),
+    command,
+    commandError
+  });
+}));
+
 // Review + Accept: steps 5 and 6 of the same canonical flow. The human
 // approval gate lives here, on the durable record, exactly as before.
 router.get('/platform/compose/:batchId', requireAdminPage, (req, res) => {
@@ -447,6 +502,71 @@ function uploadBatchMedia(req, res, next) {
 router.post('/api/platform/batches', requireAdminApi, uploadBatchMedia, asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const files = req.files || [];
+  if (config.canonicalExecution.enabled) {
+    const preparedMedia = resolvePreparedMediaList(
+      parseJsonArray(req.body.autoMusicTokens),
+      resolveUserId(req),
+      files
+    );
+    // Preserve source cardinality until canonical preflight has enforced the
+    // one-video P0 boundary. Only replace the source with its prepared
+    // derivative when there is exactly one uploaded source and at most one
+    // verified derivative. Multiple uploads or multiple verified alternatives
+    // must reach preflight as multiple files and fail closed, never be silently
+    // truncated to the first entry.
+    const canonicalFiles = files.length === 1 && preparedMedia.length <= 1
+      ? [preparedMedia[0] && preparedMedia[0].file
+        ? preparedMedia[0].file
+        : files[0]]
+      : (files.length > 1
+        ? files
+        : preparedMedia.map((entry) => entry && entry.file).filter(Boolean));
+    const cleanupFiles = [
+      ...files,
+      ...preparedMedia.map((entry) => entry && entry.file).filter(Boolean)
+    ];
+    try {
+      const result = await canonicalExecution.acceptComposerRequest(websiteContext(req), {
+        files: canonicalFiles,
+        destinations: parseJsonArray(req.body.destinations),
+        caption: req.body.caption,
+        hashtags: req.body.hashtags,
+        mediaUrl: req.body.publicMediaUrl,
+        youtube: {
+          title: req.body.youtubeTitle,
+          description: req.body.youtubeDescription
+        },
+        scheduleMode: req.body.scheduleMode,
+        endDate: req.body.endDate,
+        startDate: req.body.startDate,
+        startTime: req.body.startTime,
+        timezoneName: req.body.timezoneName,
+        timezoneOffsetMinutes: req.body.timezoneOffsetMinutes,
+        staggerMinutes: req.body.staggerMinutes,
+        firstDay: req.body.firstDay,
+        lastDay: req.body.lastDay,
+        postsPerDay: req.body.postsPerDay,
+        dailyStartTime: req.body.dailyStartTime,
+        dailyEndTime: req.body.dailyEndTime,
+        intraDayIntervalMinutes: req.body.intraDayIntervalMinutes,
+        dailySlots: parseJsonArray(req.body.dailySlots),
+        intakeKey: req.body.intakeKey,
+        requestedAt: req.body.requestedAt
+      });
+      await removeTemporaryUploads(cleanupFiles);
+      res.status(result.replayed ? 200 : 201).json({
+        ok: true,
+        accepted: result.accepted,
+        awaitingApproval: result.awaitingApproval,
+        replayed: result.replayed,
+        command: result.command
+      });
+    } catch (error) {
+      await removeTemporaryUploads(cleanupFiles);
+      if (!sendServiceError(res, error)) throw error;
+    }
+    return;
+  }
   try {
     const result = await batchService.createBatch(websiteContext(req), {
       files,

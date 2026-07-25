@@ -109,6 +109,37 @@ test('a registry accepts a well-formed provider and reports what it registered',
   assert.deepEqual(registry.list(), ['autoposter', 'operator']);
 });
 
+test('AutoPoster reads standalone Runtime jobs only when canonical projection is enabled', async () => {
+  let queueReads = 0;
+  const options = {
+    listBatches: async () => ({ batches: [] }),
+    listQueue: async () => {
+      queueReads += 1;
+      return {
+        items: [{
+          id: 'runtime-job-provider',
+          status: 'scheduled',
+          approved: false,
+          runtimeGraphId: 'graph:runtime-provider'
+        }]
+      };
+    }
+  };
+
+  const legacyItems = await createAutoPosterWorkProvider(options).listWork({});
+  assert.deepEqual(legacyItems, []);
+  assert.equal(queueReads, 0);
+
+  const canonicalItems = await createAutoPosterWorkProvider({
+    ...options,
+    includeCanonicalRuntimeJobs: true
+  }).listWork({});
+  assert.equal(queueReads, 1);
+  assert.equal(canonicalItems.length, 1);
+  assert.equal(canonicalItems[0].workId, 'runtime-job-provider');
+  assert.equal(canonicalItems[0].runtimeGraphId, 'graph:runtime-provider');
+});
+
 test('duplicate module registration is rejected rather than double-counted', () => {
   const registry = platformWorkProviders.createWorkRegistry();
   registry.register(operatorProviderReturning([]));
@@ -184,6 +215,31 @@ test('an unapproved Operator graph waits on an approver and proposes no link', (
 });
 
 // ── Mixed-module aggregation ───────────────────────────────────────────────
+
+test('an unavailable evidence bundle does not turn completed product work into a product failure', () => {
+  const projected = platformStatus.projectOperatorAutoPosterCommand({
+    commandId: `platform-autoposter-${'e'.repeat(40)}`,
+    graphId: 'graph:evidence-unavailable',
+    lifecycleState: 'completed',
+    productState: 'draft_created',
+    publicationApprovalState: 'human_required',
+    campaignId: 'campaign-evidence-unavailable',
+    jobIds: ['job-evidence-unavailable'],
+    approvalId: 'autoposter-approval:mission-evidence-unavailable',
+    evidenceBundleId: 'autoposter-evidence:graph:evidence-unavailable',
+    evidenceAvailable: false,
+    error: {
+      code: 'PLATFORM_EVIDENCE_UNAVAILABLE',
+      message: 'Evidence could not be read after the product result became durable.'
+    }
+  });
+
+  assert.equal(projected.state, WORK_STATE.WAITING_APPROVAL);
+  assert.equal(projected.needsApproval, true);
+  assert.equal(projected.counts.failed, 0);
+  assert.equal(projected.evidenceAvailable, false);
+  assert.equal(projected.evidenceUnavailable, true);
+});
 
 async function collectMixed() {
   const registry = platformWorkProviders.createWorkRegistry();
@@ -310,6 +366,208 @@ test('one failed provider degrades alone and the others still report', async () 
   assert.match(collected.degraded[0].reason, /operator is offline for test/);
 });
 
+test('linked Operator command, graph, and AutoPoster runtime job project as one AutoPoster row', async () => {
+  const graphId = 'graph:canonical:one';
+  const commandId = `platform-autoposter-${'a'.repeat(40)}`;
+  const runtimeJob = platformStatus.projectAutoPosterRuntimeJob({
+    id: 'runtime-job-1',
+    status: 'scheduled',
+    approved: false,
+    runtimeGraphId: graphId,
+    runtimeMissionId: 'graph:canonical:one:node:schedule',
+    campaignId: 'campaign-1',
+    approvalId: 'autoposter-approval:graph:canonical:one:node:schedule',
+    evidenceBundleId: 'autoposter-evidence:graph:canonical:one',
+    scheduledAt: '2026-07-27T09:00:00.000Z',
+    createdAt: '2026-07-26T09:00:02.000Z',
+    history: [{ event: 'runtime_scheduled' }]
+  });
+  const graph = {
+    ...platformStatus.projectOperatorMissionGraph({
+      graphId,
+      objective: 'Canonical AutoPoster work',
+      status: 'completed',
+      approvedBy: 'admin:owner',
+      nodeCount: 1,
+      nodes: [{ status: 'completed' }],
+      createdAt: '2026-07-26T09:00:00.000Z'
+    }),
+    stateReason: 'Operator recovery is an internal control action.'
+  };
+  const command = platformStatus.projectOperatorAutoPosterCommand({
+    commandId,
+    graphId,
+    missionId: 'graph:canonical:one:node:schedule',
+    lifecycleState: 'completed',
+    productState: 'scheduled_unapproved',
+    publicationApprovalState: 'human_required',
+    campaignId: 'campaign-1',
+    jobIds: ['runtime-job-1'],
+    approvalId: 'autoposter-approval:graph:canonical:one:node:schedule',
+    evidenceBundleId: 'autoposter-evidence:graph:canonical:one',
+    createdAt: '2026-07-26T09:00:00.000Z',
+    updatedAt: '2026-07-26T09:00:03.000Z'
+  });
+
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register({ moduleId: 'autoposter', listWork: async () => [runtimeJob] });
+  registry.register({ moduleId: 'operator', listWork: async () => [graph, command] });
+  const collected = await registry.collect({});
+
+  assert.equal(collected.items.length, 1, 'Work contains one coherent row');
+  assert.equal(collected.items.filter((item) => item.needsApproval).length, 1, 'Approvals contains it once');
+  assert.equal(collected.items.filter((item) => item.evidenceAvailable).length, 1, 'Evidence contains it once');
+  const item = collected.items[0];
+  assert.equal(item.moduleId, 'autoposter');
+  assert.equal(item.workId, commandId);
+  assert.equal(item.runtimeGraphId, graphId);
+  assert.equal(item.productJobId, 'runtime-job-1');
+  assert.equal(item.href, `/platform/compose/commands/${commandId}`);
+  assert.equal(item.actionable, true);
+  assert.equal(item.stateReason, 'Draft scheduled; waiting for human publication approval.');
+  assert.doesNotMatch(item.stateReason, /Operator|internal control|recovery/i);
+  assert.deepEqual(item.linkage, {
+    commandAvailable: true,
+    operatorGraphAvailable: true,
+    productAvailable: true
+  });
+  assert.equal(collected.summary.total, 1);
+  assert.equal(collected.summary.awaitingApproval, 1);
+});
+
+test('a graphless accepted command remains visible as AutoPoster work with a safe detail link', async () => {
+  const commandId = `platform-autoposter-${'f'.repeat(40)}`;
+  const command = platformStatus.projectOperatorAutoPosterCommand({
+    commandId,
+    lifecycleState: 'failed_recoverable',
+    productState: 'failed',
+    error: {
+      code: 'PLATFORM_COMMAND_EXECUTION_FAILED',
+      message: 'Canonical execution did not bind a graph.'
+    },
+    createdAt: '2026-07-26T09:30:00.000Z'
+  });
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register({ moduleId: 'operator', listWork: async () => [command] });
+  const collected = await registry.collect({});
+
+  assert.equal(collected.items.length, 1);
+  const item = collected.items[0];
+  assert.equal(item.moduleId, 'autoposter');
+  assert.equal(item.workId, commandId);
+  assert.equal(item.state, WORK_STATE.FAILED);
+  assert.equal(item.stateReason, 'Accepted AutoPoster work failed before a product draft was created.');
+  assert.doesNotMatch(item.stateReason, /Operator|graph|mission|internal/i);
+  assert.equal(item.href, `/platform/compose/commands/${commandId}`);
+  assert.equal(item.actionable, true);
+});
+
+test('linked product remains visible without falsely advertising unavailable evidence', async () => {
+  const graphId = 'graph:evidence-degraded-linked';
+  const commandId = `platform-autoposter-${'b'.repeat(40)}`;
+  const product = platformStatus.projectAutoPosterRuntimeJob({
+    id: 'runtime-job-evidence-degraded',
+    status: 'scheduled',
+    approved: false,
+    runtimeGraphId: graphId,
+    evidenceBundleId: `autoposter-evidence:${graphId}`
+  });
+  const graph = platformStatus.projectOperatorMissionGraph({
+    graphId,
+    status: 'completed',
+    nodeCount: 1,
+    nodes: [{ status: 'completed' }]
+  });
+  const command = platformStatus.projectOperatorAutoPosterCommand({
+    commandId,
+    graphId,
+    lifecycleState: 'completed',
+    productState: 'draft_created',
+    publicationApprovalState: 'human_required',
+    jobIds: ['runtime-job-evidence-degraded'],
+    evidenceBundleId: `autoposter-evidence:${graphId}`,
+    evidenceAvailable: false,
+    error: {
+      code: 'PLATFORM_EVIDENCE_UNAVAILABLE',
+      message: 'Internal evidence read failed.'
+    }
+  });
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register({ moduleId: 'autoposter', listWork: async () => [product] });
+  registry.register({ moduleId: 'operator', listWork: async () => [graph, command] });
+  const collected = await registry.collect({});
+
+  assert.equal(collected.items.length, 1);
+  assert.equal(collected.items[0].state, WORK_STATE.WAITING_APPROVAL);
+  assert.equal(collected.items[0].evidenceAvailable, false);
+  assert.equal(collected.items[0].evidenceUnavailable, true);
+});
+
+test('multiple product jobs on one graph surface one explicit non-actionable linkage conflict', async () => {
+  const graphId = 'graph:product-conflict';
+  const commandId = `platform-autoposter-${'d'.repeat(40)}`;
+  const product = (id) => platformStatus.projectAutoPosterRuntimeJob({
+    id,
+    status: 'scheduled',
+    approved: false,
+    runtimeGraphId: graphId,
+    createdAt: '2026-07-26T09:45:00.000Z'
+  });
+  const command = platformStatus.projectOperatorAutoPosterCommand({
+    commandId,
+    graphId,
+    lifecycleState: 'completed',
+    productState: 'draft_created',
+    publicationApprovalState: 'human_required',
+    jobIds: ['runtime-job-conflict-a', 'runtime-job-conflict-b']
+  });
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register({
+    moduleId: 'autoposter',
+    listWork: async () => [product('runtime-job-conflict-a'), product('runtime-job-conflict-b')]
+  });
+  registry.register({ moduleId: 'operator', listWork: async () => [command] });
+  const collected = await registry.collect({});
+
+  assert.equal(collected.items.length, 1);
+  const item = collected.items[0];
+  assert.equal(item.moduleId, 'autoposter');
+  assert.equal(item.workId, commandId);
+  assert.equal(item.state, WORK_STATE.FAILED);
+  assert.equal(item.counts.total, 2);
+  assert.equal(item.counts.failed, 1);
+  assert.match(item.stateReason, /multiple AutoPoster product jobs/i);
+  assert.equal(item.href, '');
+  assert.equal(item.actionable, false);
+  assert.equal(item.productJobId, '');
+  assert.equal(item.linkage.productConflict, true);
+});
+
+test('linked product truth remains visible and Operator failure remains honestly degraded', async () => {
+  const runtimeJob = platformStatus.projectAutoPosterRuntimeJob({
+    id: 'runtime-job-degraded',
+    status: 'scheduled',
+    approved: false,
+    runtimeGraphId: 'graph:degraded',
+    campaignId: 'campaign-degraded',
+    evidenceBundleId: 'autoposter-evidence:graph:degraded',
+    createdAt: '2026-07-26T10:00:00.000Z'
+  });
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register({ moduleId: 'autoposter', listWork: async () => [runtimeJob] });
+  registry.register(failingProvider('operator', 'operator command read is unavailable'));
+  const collected = await registry.collect({});
+
+  assert.equal(collected.items.length, 1);
+  assert.equal(collected.items[0].workId, 'runtime-job-degraded');
+  assert.notEqual(collected.items[0].workId, 'graph:degraded');
+  assert.equal(collected.items[0].productJobId, 'runtime-job-degraded');
+  assert.equal(collected.degraded.length, 1);
+  assert.equal(collected.degraded[0].moduleId, 'operator');
+  assert.match(collected.degraded[0].reason, /unavailable/);
+  assert.equal(collected.error, '', 'one readable product source is not a total outage');
+});
+
 test('a failed provider is never rendered as an empty one', async () => {
   const registry = platformWorkProviders.createWorkRegistry();
   registry.register(failingProvider('operator', 'unreachable'));
@@ -384,6 +642,49 @@ test('the Operator provider issues one bounded GET against the read model', asyn
   assert.ok(requests[0].options.signal, 'the read must be abortable');
   assert.equal(items.length, 2);
   assert.equal(items[0].moduleId, 'operator');
+});
+
+test('the canonical feature adds one bounded command GET without adding a mutation', async () => {
+  const commandId = `platform-autoposter-${'c'.repeat(40)}`;
+  const requests = [];
+  const provider = platformOperatorProvider.createOperatorWorkProvider({
+    baseUrl: 'http://127.0.0.1:3001/',
+    includeAutoPosterCommands: true,
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.includes('/api/platform/autoposter-commands')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            commands: [{
+              commandId,
+              graphId: 'graph:canonical-provider',
+              lifecycleState: 'completed',
+              productState: 'draft_created',
+              publicationApprovalState: 'human_required',
+              jobIds: ['job-canonical-provider']
+            }]
+          })
+        };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify({ graphs: [] }) };
+    }
+  });
+
+  const items = await provider.listWork();
+  assert.deepEqual(
+    requests.map((request) => request.url).sort(),
+    [
+      'http://127.0.0.1:3001/api/mission-graphs?limit=25',
+      'http://127.0.0.1:3001/api/platform/autoposter-commands?limit=25'
+    ]
+  );
+  assert.ok(requests.every((request) => request.options.method === 'GET'));
+  assert.ok(requests.every((request) => request.options.signal));
+  assert.equal(items.length, 1);
+  assert.equal(items[0].workId, commandId);
+  assert.equal(items[0].workKind, 'autoposter_command');
 });
 
 test('the Operator adapter contains no code path that can mutate Operator state', () => {

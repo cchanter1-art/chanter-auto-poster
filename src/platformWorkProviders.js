@@ -151,6 +151,176 @@ function createWorkRegistry() {
     };
   }
 
+  function mergedLinkedState(group) {
+    const states = new Set(group.map((item) => item.state));
+    if (states.has(platformStatus.WORK_STATE.FAILED)) return platformStatus.WORK_STATE.FAILED;
+    if (states.has(platformStatus.WORK_STATE.WAITING_APPROVAL)) {
+      return platformStatus.WORK_STATE.WAITING_APPROVAL;
+    }
+    if (states.has(platformStatus.WORK_STATE.RUNNING)) return platformStatus.WORK_STATE.RUNNING;
+    if (states.has(platformStatus.WORK_STATE.PAUSED)) return platformStatus.WORK_STATE.PAUSED;
+    if (states.has(platformStatus.WORK_STATE.COMPLETED)) return platformStatus.WORK_STATE.COMPLETED;
+    return platformStatus.WORK_STATE.IDLE;
+  }
+
+  // One canonical AutoPoster command can be visible from three truthful read
+  // models: Operator command, Operator graph, and the product-native Runtime
+  // job. Graph identity is their shared join key. Collapse only exact linked
+  // groups; unrelated work remains untouched. Provider failures were already
+  // recorded above and remain in `degraded`, so dedup never turns an unreadable
+  // side into a false empty one.
+  function deduplicateLinkedWork(items) {
+    const unlinked = [];
+    const linked = new Map();
+    for (const item of items) {
+      const graphId = String(item.runtimeGraphId || '').trim();
+      if (!graphId) {
+        if (item.workKind === 'autoposter_command') {
+          const commandId = String(item.canonicalWorkId || item.workId || '');
+          unlinked.push(adopt({
+            ...item,
+            workId: commandId,
+            href: commandId
+              ? `/platform/compose/commands/${encodeURIComponent(commandId)}`
+              : ''
+          }, 'autoposter', ownershipOf('autoposter')));
+        } else {
+          unlinked.push(item);
+        }
+        continue;
+      }
+      if (!linked.has(graphId)) linked.set(graphId, []);
+      linked.get(graphId).push(item);
+    }
+
+    const merged = [...unlinked];
+    for (const [graphId, group] of linked.entries()) {
+      const commandRecords = group.filter((item) => item.workKind === 'autoposter_command');
+      const productRecords = group.filter((item) => item.workKind === 'autoposter_runtime_job');
+      const command = commandRecords[0];
+      const product = productRecords[0];
+      if (group.length === 1 || (!command && !product)) {
+        merged.push(...group);
+        continue;
+      }
+      const base = product || command;
+      const canonicalWorkId = String(
+        (command && command.canonicalWorkId)
+        || (product && product.canonicalWorkId)
+        || base.workId
+      );
+      const updatedAt = group
+        .map((item) => String(item.updatedAt || item.createdAt || ''))
+        .sort()
+        .at(-1) || '';
+      const createdAt = group
+        .map((item) => String(item.createdAt || ''))
+        .filter(Boolean)
+        .sort()
+        .at(0) || '';
+      const evidenceUnavailable = group.some((item) => item.evidenceUnavailable === true);
+      if (productRecords.length > 1) {
+        const conflictWorkId = canonicalWorkId || productRecords
+          .map((item) => String(item.productJobId || item.workId || ''))
+          .filter(Boolean)
+          .sort()[0];
+        const conflict = adopt({
+          ...base,
+          workId: conflictWorkId,
+          title: 'AutoPoster linkage conflict',
+          state: platformStatus.WORK_STATE.FAILED,
+          stateReason: 'Multiple AutoPoster product jobs share one canonical execution link.',
+          counts: {
+            total: productRecords.length,
+            prepared: productRecords.reduce(
+              (sum, item) => sum + Number((item.counts && item.counts.prepared) || 0),
+              0
+            ),
+            failed: 1,
+            accepted: productRecords.reduce(
+              (sum, item) => sum + Number((item.counts && item.counts.accepted) || 0),
+              0
+            ),
+            awaiting: productRecords.reduce(
+              (sum, item) => sum + Number((item.counts && item.counts.awaiting) || 0),
+              0
+            )
+          },
+          needsApproval: false,
+          href: '',
+          createdAt,
+          updatedAt,
+          evidenceAvailable: !evidenceUnavailable
+            && group.some((item) => item.evidenceAvailable),
+          evidenceUnavailable,
+          runtimeGraphId: graphId,
+          runtimeMissionId: '',
+          canonicalWorkId,
+          productJobId: '',
+          campaignId: '',
+          approvalId: '',
+          evidenceBundleId: '',
+          linkage: {
+            commandAvailable: Boolean(command),
+            operatorGraphAvailable: group.some((item) => item.workKind === 'operator_mission_graph'),
+            productAvailable: true,
+            productConflict: true
+          }
+        }, 'autoposter', ownershipOf('autoposter'));
+        merged.push({ ...conflict, actionable: false, href: '' });
+        continue;
+      }
+      const graph = group.find((item) => item.workKind === 'operator_mission_graph');
+      const stateReason = String(
+        (product && product.stateReason)
+        || (command && command.stateReason)
+        || (graph && graph.stateReason)
+        || base.stateReason
+        || ''
+      );
+      const canonical = {
+        ...base,
+        workId: canonicalWorkId,
+        title: product ? product.title : command.title,
+        state: mergedLinkedState(group),
+        stateReason,
+        needsApproval: group.some((item) => item.needsApproval),
+        href: command && canonicalWorkId
+          ? `/platform/compose/commands/${encodeURIComponent(canonicalWorkId)}`
+          : '',
+        createdAt,
+        updatedAt,
+        evidenceAvailable: !evidenceUnavailable
+          && group.some((item) => item.evidenceAvailable),
+        evidenceUnavailable,
+        runtimeGraphId: graphId,
+        runtimeMissionId: String(
+          group.map((item) => item.runtimeMissionId).find((value) => String(value || '')) || ''
+        ),
+        canonicalWorkId,
+        productJobId: String(
+          group.map((item) => item.productJobId).find((value) => String(value || '')) || ''
+        ),
+        campaignId: String(
+          group.map((item) => item.campaignId).find((value) => String(value || '')) || ''
+        ),
+        approvalId: String(
+          group.map((item) => item.approvalId).find((value) => String(value || '')) || ''
+        ),
+        evidenceBundleId: String(
+          group.map((item) => item.evidenceBundleId).find((value) => String(value || '')) || ''
+        ),
+        linkage: {
+          commandAvailable: Boolean(command),
+          operatorGraphAvailable: group.some((item) => item.workKind === 'operator_mission_graph'),
+          productAvailable: Boolean(product)
+        }
+      };
+      merged.push(adopt(canonical, 'autoposter', ownershipOf('autoposter')));
+    }
+    return merged;
+  }
+
   // Providers are read concurrently and independently. One slow or broken
   // module cannot delay or break the others, which is the whole point of the
   // seam: the Platform survives its modules.
@@ -188,7 +358,7 @@ function createWorkRegistry() {
       ? degraded.map((entry) => entry.reason).join(DEGRADED_SEPARATOR)
       : '';
 
-    const sorted = platformStatus.sortWork(items);
+    const sorted = platformStatus.sortWork(deduplicateLinkedWork(items));
     return {
       items: sorted,
       summary: platformStatus.summarizeWork(sorted),

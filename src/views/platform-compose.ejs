@@ -840,6 +840,12 @@
       update();
 
       // ── 6 · Accept ──
+      // One identity per page lifetime: repeated submission reuses the same
+      // accepted command instead of creating a second one.
+      var composerIntakeKey = (window.crypto && window.crypto.randomUUID)
+        ? window.crypto.randomUUID()
+        : String(Date.now());
+      var composerRequestedAt = new Date().toISOString();
       form.addEventListener('submit', function (event) {
         event.preventDefault();
         var destinations = selectedDestinations();
@@ -861,7 +867,8 @@
         }
         data.append('timezoneName', (Intl.DateTimeFormat().resolvedOptions().timeZone || ''));
         data.append('timezoneOffsetMinutes', String(new Date().getTimezoneOffset()));
-        data.append('intakeKey', (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
+        data.append('intakeKey', composerIntakeKey);
+        data.append('requestedAt', composerRequestedAt);
 
         var usingAdvanced = advanced && advanced.open && currentMode !== 'interval';
         if (recurringOn()) {
@@ -899,6 +906,12 @@
         fetch('/api/platform/batches', { method: 'POST', body: data, headers: { 'Accept': 'application/json' } })
           .then(function (response) { return response.json(); })
           .then(function (payload) {
+            if (payload && payload.ok && payload.command && payload.command.commandId) {
+              submitStatus.textContent = 'Accepted Â· Awaiting approval';
+              window.location.href = '/platform/compose/commands/'
+                + encodeURIComponent(payload.command.commandId);
+              return;
+            }
             if (payload && payload.ok && payload.batch) {
               window.location.href = '/platform/compose/' + encodeURIComponent(payload.batch.batchId);
               return;

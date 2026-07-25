@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Accepted work — CHANTER Platform</title>
+  <link rel="stylesheet" href="/platform/platform.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('_platform-nav', { active: locals.active || '' }) %>
+
+    <div class="breadcrumb">
+      <a href="/platform">Platform</a> / <a href="/platform/compose">Compose</a> / Accepted work
+    </div>
+    <h1 class="page-title">Accepted work</h1>
+    <p class="page-subtitle">
+      This is a read-only acknowledgement. Publishing still requires the existing human approval.
+    </p>
+
+    <% if (commandError) { %>
+      <div class="notice notice-error">
+        <strong>Work status is temporarily unavailable.</strong>
+        <div><%= commandError %></div>
+      </div>
+    <% } else { %>
+      <div class="panel">
+        <div class="batch-summary">
+          <span class="chip chip-completed">Accepted</span>
+          <span class="chip chip-attention">Awaiting approval</span>
+        </div>
+        <dl>
+          <dt>Work ID</dt>
+          <dd><code><%= command.commandId %></code></dd>
+          <dt>Work state</dt>
+          <dd><%= command.productState || command.lifecycleState || 'accepted' %></dd>
+          <dt>Publication</dt>
+          <dd>Human approval required</dd>
+          <% if (command.updatedAt) { %>
+            <dt>Updated</dt>
+            <dd><%= command.updatedAt %></dd>
+          <% } %>
+        </dl>
+        <div class="batch-actions">
+          <a class="btn btn-primary" href="/private/autoposter">Open review queue</a>
+          <a class="btn btn-quiet" href="/platform/work">View work</a>
+        </div>
+      </div>
+    <% } %>
+  </div>
+</body>
+</html>

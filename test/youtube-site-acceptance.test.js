@@ -49,6 +49,21 @@ const posts = [];
 storage.getTikTokAccounts = async () => tiktokAccounts;
 storage.getTikTokAccount = async (userId, accountId) =>
   tiktokAccounts.find((account) => account.accountId === accountId && account.userId === userId) || null;
+storage.getCanonicalTikTokAccounts = async () => tiktokAccounts;
+storage.getCanonicalTikTokAccount = async (userId, accountId) =>
+  tiktokAccounts.find((account) => account.accountId === accountId && account.userId === userId) || null;
+storage.listConnectedAccountReferencesForOwner = async () => [
+  ...tiktokAccounts.map((account) => ({
+    provider: 'tiktok',
+    accountId: account.accountId,
+    workspaceId: ''
+  })),
+  ...youtubeAccounts.map((account) => ({
+    provider: 'youtube',
+    accountId: account.accountId,
+    workspaceId: ''
+  }))
+];
 storage.getTikTokAuth = async () => ({ connected: true, access_token: 'CANARY-TIKTOK-ACCESS', open_id: TIKTOK_ACCOUNT_ID });
 storage.getYouTubeAccounts = async () => youtubeAccounts;
 storage.getYouTubeAccount = async (userId, accountId) =>

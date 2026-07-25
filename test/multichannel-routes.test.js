@@ -69,6 +69,11 @@ const processPostCalls = [];
 storage.getTikTokAccounts = async () => accounts;
 storage.getTikTokAccount = async (userId, accountId) =>
   accounts.find((account) => account.accountId === accountId) || null;
+storage.listConnectedAccountReferencesForOwner = async () => accounts.map((account) => ({
+  provider: 'tiktok',
+  accountId: account.accountId,
+  workspaceId: ''
+}));
 storage.getPosts = async (userId, accountId) =>
   queueJobs.filter((job) => !accountId || job.accountId === accountId);
 storage.getPost = async (userId, id, accountId) => {

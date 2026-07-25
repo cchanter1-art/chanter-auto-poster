@@ -1583,6 +1583,8 @@ async function addUploadedPosts(userId, files, defaults = {}) {
           runtimeGraphId: String(defaults.runtimeGraphId || ''),
           runtimeAction: String(defaults.runtimeAction || ''),
           runtimePayloadHash: String(defaults.runtimePayloadHash || ''),
+          approvalId: String(defaults.approvalId || ''),
+          evidenceBundleId: String(defaults.evidenceBundleId || ''),
           providerProofMode: defaults.providerProofMode === true,
           approvedMedia: sanitizeApprovedMediaIdentity(defaults.approvedMedia, {
             maxByteSize: config.youtube.maxVideoBytes

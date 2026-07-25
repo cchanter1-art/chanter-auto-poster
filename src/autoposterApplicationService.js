@@ -209,6 +209,37 @@ function deterministicPostId(
   return `runtime-${digest}`;
 }
 
+function runtimeLinkageIds({
+  missionId = '',
+  graphId = '',
+  documentId = '',
+  idempotencyKey = ''
+} = {}) {
+  const exactMissionId = String(missionId || '');
+  const exactGraphId = String(graphId || '');
+  for (const [label, value] of [['missionId', exactMissionId], ['graphId', exactGraphId]]) {
+    if (
+      value
+      && (
+        value !== value.trim()
+        || value.length > 220
+        || /[\x00-\x1f\x7f]/.test(value)
+      )
+    ) {
+      throw new AutoPosterApplicationError(`${label} is invalid for runtime linkage.`, {
+        status: 409,
+        code: 'recovery_scope_mismatch'
+      });
+    }
+  }
+  const fallback = String(documentId || '').trim()
+    || `runtime-link-${createHash('sha256').update(String(idempotencyKey || '')).digest('hex').slice(0, 40)}`;
+  return {
+    approvalId: `autoposter-approval:${exactMissionId || fallback}`,
+    evidenceBundleId: `autoposter-evidence:${exactGraphId || exactMissionId || fallback}`
+  };
+}
+
 function isAlreadyExistsError(error) {
   const code = error && error.code;
   return code === 6 || code === '6' || code === 'already-exists' || code === 'ALREADY_EXISTS';
@@ -1140,6 +1171,15 @@ function createAutoPosterApplicationService(dependencies = {}) {
     }
 
     const firstAccount = accounts[0];
+    const runtimeGraphId = context.source === 'runtime' ? String(input.runtimeGraphId || '') : '';
+    const runtimeLinkage = context.source === 'runtime'
+      ? runtimeLinkageIds({
+          missionId: runtimeMetadata.missionId,
+          graphId: runtimeGraphId,
+          documentId: deterministicId,
+          idempotencyKey
+        })
+      : { approvalId: '', evidenceBundleId: '' };
     const selfApprove = context.source === 'website' && context.approval
       ? { approvedBy: context.approval.approvedBy }
       : null;
@@ -1172,9 +1212,11 @@ function createAutoPosterApplicationService(dependencies = {}) {
       runtimeIdempotencyKey: context.source === 'runtime' ? idempotencyKey : '',
       runtimeScheduledBy: context.source === 'runtime' ? requestedBy : '',
       runtimeMissionId: context.source === 'runtime' ? runtimeMetadata.missionId : '',
-      runtimeGraphId: context.source === 'runtime' ? String(input.runtimeGraphId || '') : '',
+      runtimeGraphId,
       runtimeAction: context.source === 'runtime' ? runtimeMetadata.action : '',
       runtimePayloadHash: context.source === 'runtime' ? runtimeMetadata.missionPayloadHash : '',
+      approvalId: runtimeLinkage.approvalId,
+      evidenceBundleId: runtimeLinkage.evidenceBundleId,
       providerProofMode,
       approvedMedia: providerProofMode ? approvedMedia : null,
       scheduledAt: schedule.mode === 'explicit' ? schedule.scheduledAt : '',
@@ -2043,6 +2085,37 @@ function createAutoPosterApplicationService(dependencies = {}) {
     return { commercialContext, view: result.view };
   }
 
+  // Fail-closed commercial preflight for a command that will be scheduled by
+  // Runtime later. It resolves the same server-owned commercial context and
+  // invokes the same authorization operation schedulePost enforces before a
+  // durable queue write; no usage or product record is mutated here.
+  async function authorizeSchedule(contextInput, input = {}) {
+    const context = createExecutionContext(contextInput);
+    const requestedProvider = providers.normalizeStoredProviderId(input.provider);
+    let providerDefinition;
+    try {
+      providerDefinition = providers.assertSchedulableProvider(requestedProvider.providerId);
+      providers.assertProviderCapability(providerDefinition.id, 'schedulable');
+    } catch (error) {
+      throw translateProviderError(error);
+    }
+    const commercialContext = await resolveCommercialContext(context);
+    const result = await commercialAdapter.authorizeSchedule({
+      resolvedContext: commercialContext,
+      providerId: providerDefinition.id,
+      source: String(input.authorizationSource || context.source),
+      quantity: Number(input.quantity || 1),
+      scheduledAt: String(input.scheduledAt || '')
+    });
+    if (!result.decision.allowed) throw denialError(result.decision);
+    return {
+      allowed: true,
+      workspaceId: commercialContext.workspace.workspaceId,
+      commercialContext,
+      decision: result.decision
+    };
+  }
+
   async function authorizeAccountConnection(contextInput, input = {}) {
     const context = createExecutionContext(contextInput);
     const commercialContext = await resolveCommercialContext(context);
@@ -2079,6 +2152,7 @@ function createAutoPosterApplicationService(dependencies = {}) {
     deleteMarkedPosts,
     deletePost,
     authorizeAccountConnection,
+    authorizeSchedule,
     getConnectedAccount,
     validateConnectedAccount,
     getPlanUsage,
@@ -2111,6 +2185,7 @@ module.exports = {
   createAutoPosterApplicationService,
   createExecutionContext,
   deterministicPostId,
+  runtimeLinkageIds,
   targetScopedIdempotencyKey,
   isHttpsUrl,
   normalizeExplicitSchedule,

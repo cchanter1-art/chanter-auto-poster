@@ -99,6 +99,67 @@ function projectAutoPosterBatch(record = {}) {
   };
 }
 
+// Runtime-created canonical P0 work has no Platform batch record: it is one
+// product-native queue job linked to an Operator graph. Project that durable
+// job directly so the registry can merge it with the command/graph read model.
+function projectAutoPosterRuntimeJob(record = {}) {
+  const status = String(record.status || '').trim();
+  const approved = Boolean(record.approved);
+  let state = WORK_STATE.IDLE;
+  let reason = status ? `Queue state: ${status}.` : 'Unknown queue state.';
+  if (status === 'failed') {
+    state = WORK_STATE.FAILED;
+    reason = 'AutoPoster scheduling or provider preparation failed.';
+  } else if (status === 'posted') {
+    state = WORK_STATE.COMPLETED;
+    reason = 'Publication completed.';
+  } else if (!approved && ['pending', 'scheduled', 'ready'].includes(status)) {
+    state = WORK_STATE.WAITING_APPROVAL;
+    reason = 'Draft scheduled; waiting for human publication approval.';
+  } else if (['scheduled', 'processing', 'ready'].includes(status)) {
+    state = WORK_STATE.RUNNING;
+    reason = 'Approved work is in the release queue.';
+  } else if (status === 'pending') {
+    state = WORK_STATE.IDLE;
+    reason = 'Draft preparation has not started.';
+  }
+
+  const jobId = String(record.id || '');
+  const graphId = String(record.runtimeGraphId || '');
+  return {
+    moduleId: 'autoposter',
+    // The graph is an internal correlation key, not a customer-safe work ID.
+    // Keep it solely on runtimeGraphId for exact joins.
+    workId: jobId,
+    workKind: 'autoposter_runtime_job',
+    title: `AutoPoster job ${jobId.slice(0, 8) || '—'}`,
+    state,
+    stateReason: reason,
+    counts: {
+      total: 1,
+      prepared: status === 'pending' ? 0 : 1,
+      failed: status === 'failed' ? 1 : 0,
+      accepted: approved ? 1 : 0,
+      awaiting: approved || status === 'failed' || status === 'posted' ? 0 : 1
+    },
+    needsApproval: !approved && !['failed', 'posted'].includes(status),
+    href: '',
+    createdAt: String(record.createdAt || ''),
+    updatedAt: String(record.updatedAt || record.createdAt || ''),
+    evidenceAvailable: Boolean(record.evidenceBundleId || (record.history && record.history.length)),
+    runtimeGraphId: graphId,
+    runtimeMissionId: String(record.runtimeMissionId || ''),
+    canonicalWorkId: String(record.commandId || ''),
+    productJobId: jobId,
+    campaignId: String(record.campaignId || ''),
+    approvalId: String(record.approvalId || ''),
+    evidenceBundleId: String(record.evidenceBundleId || ''),
+    scheduledAt: String(record.scheduledAt || ''),
+    destinationCount: 1,
+    videoCount: 1
+  };
+}
+
 // Projects one recurring daily series into a Platform work item. A series has
 // no record of its own: it IS the group of queue jobs that share a seriesId,
 // so every number here is counted from durable posts rather than from a
@@ -221,7 +282,81 @@ function projectOperatorMissionGraph(record = {}) {
     updatedAt: String(record.updatedAt || record.createdAt || ''),
     // A compiled graph carries a durable node set and event journal, so it can
     // be indexed here. The journal itself stays behind the Operator boundary.
-    evidenceAvailable: total > 0
+    evidenceAvailable: total > 0,
+    workKind: 'operator_mission_graph',
+    runtimeGraphId: graphId,
+    runtimeMissionId: String(record.childMissionId || ''),
+    canonicalWorkId: String(record.commandId || '')
+  };
+}
+
+function projectOperatorAutoPosterCommand(record = {}) {
+  const commandId = String(record.commandId || '');
+  const graphId = String(record.graphId || '');
+  const error = record.error && typeof record.error === 'object'
+    ? String(record.error.message || record.error.code || '')
+    : String(record.error || '');
+  const errorCode = record.error && typeof record.error === 'object'
+    ? String(record.error.code || '')
+    : '';
+  const evidenceUnavailable = errorCode === 'PLATFORM_EVIDENCE_UNAVAILABLE';
+  const lifecycle = String(record.lifecycleState || '');
+  const productState = String(record.productState || '');
+  const publicationApproval = String(record.publicationApprovalState || '');
+  let state = WORK_STATE.RUNNING;
+  let reason = 'Canonical command accepted; execution is in progress.';
+  if ((!evidenceUnavailable && error) || lifecycle.startsWith('failed') || productState === 'failed') {
+    state = WORK_STATE.FAILED;
+    // Raw gateway/mission errors belong to the internal Operator surface.
+    reason = 'Accepted AutoPoster work failed before a product draft was created.';
+  } else if (
+    publicationApproval === 'human_required'
+    || publicationApproval === 'required'
+    || publicationApproval === 'unapproved'
+    || productState === 'awaiting_approval'
+    || productState === 'scheduled_unapproved'
+  ) {
+    state = WORK_STATE.WAITING_APPROVAL;
+    reason = 'Draft execution completed; human publication approval is required.';
+  } else if (productState === 'posted' || productState === 'completed') {
+    state = WORK_STATE.COMPLETED;
+    reason = 'AutoPoster work completed.';
+  }
+  const jobIds = Array.isArray(record.jobIds)
+    ? record.jobIds.map((value) => String(value || '')).filter(Boolean)
+    : [];
+  const awaiting = state === WORK_STATE.WAITING_APPROVAL ? Math.max(1, jobIds.length) : 0;
+  return {
+    moduleId: 'operator',
+    workId: commandId,
+    workKind: 'autoposter_command',
+    title: `AutoPoster work ${commandId.slice(-8) || '—'}`,
+    state,
+    stateReason: reason,
+    counts: {
+      total: Math.max(1, jobIds.length),
+      prepared: jobIds.length,
+      failed: state === WORK_STATE.FAILED ? 1 : 0,
+      accepted: 0,
+      awaiting
+    },
+    needsApproval: awaiting > 0,
+    href: '',
+    createdAt: String(record.createdAt || record.requestedAt || ''),
+    updatedAt: String(record.updatedAt || record.createdAt || record.requestedAt || ''),
+    evidenceAvailable: record.evidenceAvailable === false
+      ? false
+      : Boolean(record.evidenceBundleId || graphId),
+    evidenceUnavailable,
+    runtimeGraphId: graphId,
+    runtimeMissionId: String(record.missionId || ''),
+    canonicalWorkId: commandId,
+    productJobId: jobIds[0] || '',
+    campaignId: String(record.campaignId || ''),
+    approvalId: String(record.approvalId || ''),
+    evidenceBundleId: String(record.evidenceBundleId || ''),
+    destinationCount: 1,
+    videoCount: 1
   };
 }
 
@@ -257,8 +392,10 @@ module.exports = {
   WORK_STATE_PRESENTATION,
   presentation,
   projectAutoPosterBatch,
+  projectAutoPosterRuntimeJob,
   projectRecurringSeries,
   projectOperatorMissionGraph,
+  projectOperatorAutoPosterCommand,
   summarizeWork,
   sortWork
 };

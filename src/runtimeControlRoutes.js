@@ -8,6 +8,11 @@ const express = require('express');
 const { createHash, timingSafeEqual } = require('crypto');
 const config = require('./config');
 const applicationService = require('./autoposterApplicationService');
+const {
+  REFERENCE_PREFIX,
+  StagedMediaError,
+  createCanonicalStagedMedia
+} = require('./canonicalStagedMedia');
 // Evolution mission runtime.connected-health: injectable Firestore-mode reader
 // (model-authored logic) + redaction boundary (existing runtime contract).
 const { readConnectedHealth } = require('./runtimeConnectedHealth');
@@ -23,6 +28,10 @@ const CAPTION_SUMMARY_LIMIT = 140;
 // canonical history entries so one response stays bounded no matter how long
 // a job's evidence log grows (the document itself is already capped at 50).
 const STATUS_HISTORY_LIMIT = 20;
+const stagedMedia = createCanonicalStagedMedia({
+  rootDir: config.canonicalExecution.stagedMediaDir,
+  secret: config.canonicalExecution.mediaReferenceSecret
+});
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -205,6 +214,44 @@ function postStatusView(post) {
   };
 }
 
+// Schedule/recovery responses carry the cross-repository identity linkage the
+// Runtime result contract requires. General status remains intentionally
+// unchanged because its strict evidence parser does not own these fields.
+function exactRuntimeResultId(value, label) {
+  const exact = String(value || '');
+  if (
+    !exact
+    || exact !== exact.trim()
+    || exact.length > 256
+    || /[\x00-\x1f\x7f]/.test(exact)
+  ) {
+    throw new applicationService.AutoPosterApplicationError(
+      `AutoPoster schedule result retained an invalid ${label}.`,
+      { status: 500, code: 'runtime_linkage_invalid' }
+    );
+  }
+  return exact;
+}
+
+function scheduleResultPostView(post) {
+  const campaignId = exactRuntimeResultId(post && post.campaignId, 'campaignId');
+  const linkage = applicationService.runtimeLinkageIds({
+    missionId: post.runtimeMissionId,
+    graphId: post.runtimeGraphId,
+    documentId: post.id,
+    idempotencyKey: post.runtimeIdempotencyKey || post.idempotencyKey
+  });
+  return {
+    ...postStatusView(post),
+    campaignId,
+    approvalId: exactRuntimeResultId(post.approvalId || linkage.approvalId, 'approvalId'),
+    evidenceBundleId: exactRuntimeResultId(
+      post.evidenceBundleId || linkage.evidenceBundleId,
+      'evidenceBundleId'
+    )
+  };
+}
+
 function connectedAccountView(account) {
   return {
     provider: String(account.provider || ''),
@@ -341,7 +388,7 @@ router.post('/schedule/reconcile', applicationRoute(async (req, res) => {
   res.json({
     ok: true,
     ...result,
-    ...(result.post ? { post: postStatusView(result.post) } : {})
+    ...(result.post ? { post: scheduleResultPostView(result.post) } : {})
   });
 }));
 
@@ -352,7 +399,8 @@ router.post('/schedule', applicationRoute(async (req, res) => {
   // Preserve the exact opaque ID; the shared account validator rejects case
   // and whitespace mismatches before queue creation.
   const accountId = String(body.accountId || '');
-  const mediaUrl = String(body.mediaUrl || '').trim();
+  const mediaInput = String(body.mediaUrl || '');
+  const mediaUrl = mediaInput.trim();
   const idempotencyKey = String(body.idempotencyKey || '');
   const requestedBy = String(body.requestedBy || '').trim() || 'agent-runtime';
   const workspaceId = String(body.workspaceId || req.get('x-chanter-workspace-id') || '').trim();
@@ -364,39 +412,95 @@ router.post('/schedule', applicationRoute(async (req, res) => {
   if (!accountId) { fail(res, 400, 'validation_failed', 'accountId is required.'); return; }
   if (!mediaUrl) { fail(res, 400, 'validation_failed', 'mediaUrl is required.'); return; }
 
-  const result = await applicationService.schedulePost(
-    runtimeContext(req, { accountId, actorId: requestedBy, idempotencyKey, workspaceId }),
-    {
-      provider: provider || undefined,
-      accountId,
-      mediaUrl,
-      caption: body.caption,
-      hashtags: body.hashtags,
-      youtube: provider === 'youtube'
-        ? { title: body.title, description: body.description }
-        : undefined,
-      requestedBy,
-      runtimeMissionId: body.missionId,
-      runtimeGraphId: body.graphId,
-      runtimeAction: body.action,
-      runtimePayloadHash: body.missionPayloadHash,
-      providerProofMode: body.providerProofMode === true,
-      approvedMedia: body.approvedMedia,
-      requireSingle: true,
-      schedule: {
-        mode: 'explicit',
-        scheduledAt: body.scheduledAt,
-        requireExplicitTimezone: true,
-        requireFuture: true
+  let materialized = null;
+  try {
+    if (mediaUrl.startsWith(REFERENCE_PREFIX)) {
+      if (mediaInput !== mediaUrl) {
+        fail(res, 400, 'staged_media_invalid', 'Staged media references are exact and cannot contain surrounding whitespace.');
+        return;
+      }
+      // Exact durable replay must not depend on staging still being present.
+      // This is the same read-only recovery authority exposed by
+      // /schedule/reconcile, evaluated before any file resolution.
+      if (body.missionId && body.action && body.missionPayloadHash) {
+        const recovery = await applicationService.reconcileRuntimeSchedule(
+          runtimeContext(req, { accountId, idempotencyKey, workspaceId }),
+          {
+            provider: String(body.provider || ''),
+            accountId,
+            scheduledAt: String(body.scheduledAt || ''),
+            missionId: String(body.missionId || ''),
+            action: String(body.action || ''),
+            missionPayloadHash: String(body.missionPayloadHash || '')
+          }
+        );
+        if (recovery.outcome === 'unique' && recovery.safeToReuse && recovery.post) {
+          const post = scheduleResultPostView(recovery.post);
+          await stagedMedia.release(mediaUrl).catch(() => {});
+          res.status(200).json({ ok: true, duplicate: true, post });
+          return;
+        }
+        if (recovery.outcome !== 'not_found') {
+          fail(
+            res,
+            409,
+            'reconciliation_required',
+            'A durable runtime result exists but is not safe for automatic replay.',
+            { recoveryOutcome: recovery.outcome, retryable: false }
+          );
+          return;
+        }
+      }
+      try {
+        materialized = await stagedMedia.materialize(mediaUrl);
+      } catch (error) {
+        if (error instanceof StagedMediaError) {
+          fail(res, error.status, error.code, error.message, { retryable: error.retryable });
+          return;
+        }
+        throw error;
       }
     }
-  );
 
-  res.status(result.duplicate ? 200 : 201).json({
-    ok: true,
-    duplicate: result.duplicate,
-    post: postStatusView(result.post)
-  });
+    const result = await applicationService.schedulePost(
+      runtimeContext(req, { accountId, actorId: requestedBy, idempotencyKey, workspaceId }),
+      {
+        provider: provider || undefined,
+        accountId,
+        ...(materialized ? { files: [materialized.file] } : { mediaUrl }),
+        caption: body.caption,
+        hashtags: body.hashtags,
+        soundMode: body.soundMode,
+        youtube: provider === 'youtube'
+          ? { title: body.title, description: body.description }
+          : undefined,
+        requestedBy,
+        runtimeMissionId: body.missionId,
+        runtimeGraphId: body.graphId,
+        runtimeAction: body.action,
+        runtimePayloadHash: body.missionPayloadHash,
+        providerProofMode: body.providerProofMode === true,
+        approvedMedia: body.approvedMedia,
+        requireSingle: true,
+        schedule: {
+          mode: 'explicit',
+          scheduledAt: body.scheduledAt,
+          requireExplicitTimezone: true,
+          requireFuture: true
+        }
+      }
+    );
+
+    const post = scheduleResultPostView(result.post);
+    if (materialized) await stagedMedia.release(mediaUrl).catch(() => {});
+    res.status(result.duplicate ? 200 : 201).json({
+      ok: true,
+      duplicate: result.duplicate,
+      post
+    });
+  } finally {
+    if (materialized) await materialized.cleanup().catch(() => {});
+  }
 }));
 
 // Cheap, bounded, read-only connected-health truth signal (evolution mission
