@@ -252,6 +252,7 @@ router.patch(
           caption: req.body.caption,
           hashtags: req.body.hashtags,
           scheduleInput: req.body.scheduleInput,
+          privacyLevel: req.body.privacyLevel,
           youtubeTitle: req.body.youtubeTitle,
           youtubeDescription: req.body.youtubeDescription
         }

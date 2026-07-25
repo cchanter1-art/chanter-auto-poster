@@ -24,6 +24,7 @@ const defaultApplicationService = require('./autoposterApplicationService');
 const { computeBatchSchedulePlan } = require('./maxScheduler');
 const providers = require('./providers');
 const { normalizeSoundMode } = require('./tiktokSoundMode');
+const { isTikTokPrivacyLevel, normalizeTikTokPrivacyLevel } = require('./tiktokPrivacy');
 
 // Fan-out destination count bound. Source-video count is already bounded by
 // config.batchIntake.maxItems; this guards against an unbounded N x M
@@ -570,12 +571,29 @@ function createBatchService(dependencies = {}) {
     const patch = {};
     if (typeof input.caption === 'string') patch.caption = input.caption.trim().slice(0, 2200);
     if (typeof input.hashtags === 'string') patch.hashtags = input.hashtags.trim().slice(0, 500);
+    // Per-destination TikTok privacy. Reuses the canonical `privacyLevel` field
+    // and validates against the one privacy vocabulary; an unknown value is
+    // rejected here with an operator-visible, typed error (never silently
+    // normalized) so a proof item can be set to SELF_ONLY with certainty. The
+    // control is TikTok-only — non-TikTok destinations carry no such field.
+    if (typeof input.privacyLevel === 'string' && input.privacyLevel.trim()) {
+      if (String(post.provider || '') !== 'tiktok') {
+        throw new BatchServiceError('A TikTok privacy level applies only to items whose destination is TikTok.', {
+          status: 409,
+          code: 'provider_mismatch'
+        });
+      }
+      if (!isTikTokPrivacyLevel(input.privacyLevel)) {
+        throw new BatchServiceError('Choose a valid TikTok privacy level.', { code: 'invalid_privacy_level' });
+      }
+      patch.privacyLevel = normalizeTikTokPrivacyLevel(input.privacyLevel);
+    }
     const scheduleInput = input.scheduleInput && typeof input.scheduleInput === 'object'
       ? { value: String(input.scheduleInput.value || ''), timezoneOffsetMinutes: input.scheduleInput.timezoneOffsetMinutes }
       : undefined;
     const titleEdit = typeof input.youtubeTitle === 'string' || typeof input.youtubeDescription === 'string';
     if (Object.keys(patch).length === 0 && !scheduleInput && !titleEdit) {
-      throw new BatchServiceError('Provide a caption, hashtags, a release time, or a YouTube title to update.');
+      throw new BatchServiceError('Provide a caption, hashtags, a release time, a privacy level, or a YouTube title to update.');
     }
 
     // Provider-specific text lives behind the dedicated destination

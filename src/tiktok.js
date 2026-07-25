@@ -5,6 +5,7 @@ const { randomUUID } = require('crypto');
 const config = require('./config');
 const storage = require('./storage');
 const { resolveSoundCapability } = require('./tiktokSoundMode');
+const { isTikTokPrivacyLevel, normalizeTikTokPrivacyLevel } = require('./tiktokPrivacy');
 const { deriveMutedVideo } = require('./autoMusic');
 
 const tokenRefreshBufferMs = 5 * 60 * 1000;
@@ -19,6 +20,12 @@ const SOUND_MODE_MANUAL_REASON =
   'TikTok does not support automatically adding recommended sound to a directly '
   + 'published video. Choose Original or Muted for automatic posting, or finish '
   + 'sound selection manually in the TikTok app.';
+// Privacy fail-closed codes (terminal, not in the scheduler's transient set):
+// a job whose privacy value is unknown, or is not permitted for the connected
+// account, must never reach the publish/init call. It is surfaced to the
+// operator, never silently downgraded to a more-public level.
+const PRIVACY_LEVEL_INVALID_CODE = 'PRIVACY_LEVEL_INVALID';
+const PRIVACY_LEVEL_UNSUPPORTED_CODE = 'PRIVACY_LEVEL_UNSUPPORTED';
 const videoInitUrl = 'https://open.tiktokapis.com/v2/post/publish/video/init/';
 const creatorInfoQueryUrl = 'https://open.tiktokapis.com/v2/post/publish/creator_info/query/';
 const MIN_CHUNK_SIZE = 5 * 1024 * 1024;
@@ -186,7 +193,37 @@ async function publishPhotoPost(post) {
     };
   }
 
+  // Privacy fail-closed #1 (no external call): an explicitly set but unknown
+  // privacy value is refused outright rather than trusted or silently defaulted
+  // — reject before we even query the account.
+  if (post.privacyLevel && !isTikTokPrivacyLevel(post.privacyLevel)) {
+    return {
+      ok: false,
+      mode: 'manual',
+      code: PRIVACY_LEVEL_INVALID_CODE,
+      reason: `Unknown TikTok privacy level "${post.privacyLevel}". Set a valid privacy level before publishing.`
+    };
+  }
+
   const creatorInfo = await queryCreatorInfoForPublish(auth.access_token);
+
+  // Privacy fail-closed #2 (capability): when the connected account reports its
+  // allowed privacy options, the persisted value MUST be one of them. Anything
+  // else fails here — before any PHOTO/VIDEO init call — instead of
+  // resolvePrivacyLevel silently substituting a different (possibly more public)
+  // level. SELF_ONLY is never converted to PUBLIC_TO_EVERYONE.
+  const requestedPrivacy = normalizeTikTokPrivacyLevel(post.privacyLevel);
+  const privacyOptions = Array.isArray(creatorInfo && creatorInfo.privacy_level_options)
+    ? creatorInfo.privacy_level_options.map((option) => String(option || '').trim()).filter(Boolean)
+    : [];
+  if (privacyOptions.length > 0 && !privacyOptions.includes(requestedPrivacy)) {
+    return {
+      ok: false,
+      mode: 'manual',
+      code: PRIVACY_LEVEL_UNSUPPORTED_CODE,
+      reason: `Privacy level ${requestedPrivacy} is not permitted for this connected TikTok account. Choose an allowed privacy level before publishing.`
+    };
+  }
 
   if (isVideoPost(post)) {
     return publishVideoPost(post, auth.access_token, creatorInfo);

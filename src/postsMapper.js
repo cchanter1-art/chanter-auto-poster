@@ -6,6 +6,7 @@ const { sanitizeProviderOperation } = require('./youtubeProviderOperation');
 const { sanitizeApprovedMediaIdentity } = require('./approvedMediaIdentity');
 const { safeDiagnosticText } = require('./forbiddenMaterial');
 const { normalizeSoundMode } = require('./tiktokSoundMode');
+const { normalizeTikTokPrivacyLevel } = require('./tiktokPrivacy');
 
 const DEFAULT_USER_ID = config.defaultUserId;
 const YOUTUBE_APPROVAL_ATTEMPT_GRANT = 1;
@@ -477,6 +478,13 @@ function mapPatchToFirestore(patch) {
   // Destination-level sound mode stays a validated enum through any generic
   // edit surface: an unknown value can never reach storage.
   if ('soundMode' in result) result.soundMode = normalizeSoundMode(result.soundMode);
+
+  // Destination-level TikTok privacy stays a validated enum through any generic
+  // edit surface too: an unknown/garbage value can never reach storage, and it
+  // fails SAFE to SELF_ONLY (never public) rather than being trusted verbatim.
+  // The operator-visible rejection of an unknown value happens earlier, at the
+  // batch-review edit boundary; this is the last-resort write-time safety net.
+  if ('privacyLevel' in result) result.privacyLevel = normalizeTikTokPrivacyLevel(result.privacyLevel);
 
   if ('lastResult' in result) result.lastResult = sanitizePostResult(result.lastResult);
   if ('lastInstagramResult' in result) result.lastInstagramResult = sanitizePostResult(result.lastInstagramResult);

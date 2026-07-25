@@ -85,6 +85,24 @@
       };
       var PROVIDER_LABELS = { tiktok: 'TikTok', youtube: 'YouTube' };
 
+      // Canonical TikTok privacy levels (mirrors src/tiktokPrivacy.js). SELF_ONLY
+      // is the proof-safe value and the default for any item without one. The
+      // server re-validates the chosen value against the connected account's
+      // allowed options and fails closed before any publish call.
+      var TIKTOK_PRIVACY_OPTIONS = [
+        { value: 'SELF_ONLY', label: 'Μόνο εγώ · Private (self only)' },
+        { value: 'FOLLOWER_OF_CREATOR', label: 'Ακόλουθοι · Followers' },
+        { value: 'MUTUAL_FOLLOW_FRIENDS', label: 'Αμοιβαίοι φίλοι · Friends' },
+        { value: 'PUBLIC_TO_EVERYONE', label: 'Δημόσιο · Public' }
+      ];
+      function privacyOptionsHtml(selected) {
+        var current = String(selected || 'SELF_ONLY').toUpperCase();
+        return TIKTOK_PRIVACY_OPTIONS.map(function (option) {
+          return '<option value="' + option.value + '"' + (option.value === current ? ' selected' : '') + '>'
+            + escapeHtml(option.label) + '</option>';
+        }).join('');
+      }
+
       var currentView = null;
       var destinations = [];
       var dirtyItems = {};
@@ -244,6 +262,10 @@
             '<label class="field-label">Τίτλος YouTube (υποχρεωτικός, έως 100 χαρακτήρες) &middot; YouTube title</label>' +
             '<input type="text" class="field-youtube-title" maxlength="100" value="' + escapeAttr(youtubeTitle) + '">' +
           '</div>' +
+          '<div class="tiktok-privacy-wrap' + (item.provider === 'tiktok' ? '' : ' hidden') + '">' +
+            '<label class="field-label">Ιδιωτικότητα TikTok &middot; TikTok privacy</label>' +
+            '<select class="field-privacy">' + privacyOptionsHtml(item.privacyLevel) + '</select>' +
+          '</div>' +
           '<div>' +
             '<label class="field-label">Λεζάντα &middot; Caption</label>' +
             '<textarea class="field-caption">' + escapeHtml(item.caption || '') + '</textarea>' +
@@ -313,9 +335,11 @@
 
       function bindItemCard(card, item) {
         var markDirty = function () { dirtyItems[item.id] = true; };
-        card.querySelectorAll('.field-caption, .field-hashtags, .field-schedule, .field-youtube-title').forEach(function (field) {
+        card.querySelectorAll('.field-caption, .field-hashtags, .field-schedule, .field-youtube-title, .field-privacy').forEach(function (field) {
           field.addEventListener('input', markDirty);
         });
+        var privacySelect = card.querySelector('.field-privacy');
+        if (privacySelect) privacySelect.addEventListener('change', markDirty);
 
         // The destination selector reveals the YouTube title field before
         // anything is saved, so the operator always sees what the new
@@ -326,6 +350,10 @@
             markDirty();
             var provider = destinationSelect.value.split('|')[0];
             card.querySelector('.youtube-title-wrap').classList.toggle('hidden', provider !== 'youtube');
+            // TikTok privacy is a TikTok-only control: reveal it exactly when
+            // the chosen destination is TikTok, mirroring the YouTube title.
+            var privacyWrap = card.querySelector('.tiktok-privacy-wrap');
+            if (privacyWrap) privacyWrap.classList.toggle('hidden', provider !== 'tiktok');
           });
         }
 
@@ -373,6 +401,13 @@
               }
             };
             if (!destinationChanged && selectedProvider === 'youtube') body.youtubeTitle = titleValue;
+            // Persist the per-destination TikTok privacy through the existing
+            // item-edit path. Only for TikTok destinations; the server validates
+            // the value and fails closed on anything unknown/unsupported.
+            if (selectedProvider === 'tiktok') {
+              var privacyField = card.querySelector('.field-privacy');
+              if (privacyField && privacyField.value) body.privacyLevel = privacyField.value;
+            }
             return api('/items/' + encodeURIComponent(item.id), {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
