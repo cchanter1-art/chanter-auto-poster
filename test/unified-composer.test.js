@@ -207,6 +207,8 @@ function renderComposer(overrides = {}) {
     selectableCount: countSelectableAccounts(groups),
     accountsError: '',
     capabilities: overrides.capabilities || capabilitiesFor(planCatalog.PLAN_IDS.CREATOR),
+    autoCaptionConfigured: overrides.autoCaptionConfigured !== false,
+    autoMusicConfigured: overrides.autoMusicConfigured !== false,
     composeDefaults: { maxItems: 30, safetyBufferMinutes: 10 }
   }, { filename: composerViewPath });
 }
@@ -302,6 +304,55 @@ test('advanced scheduling disappears entirely for a package that cannot use it',
   assert.doesNotMatch(html, /id="advanced-schedule"/);
 });
 
+// ── Absorbed classic capabilities (P1) ────────────────────────────────────
+
+test('every absorbed classic capability has a control in the one composer', () => {
+  const html = renderComposer();
+  // Auto Caption: the batch path already generates per item, so the composer
+  // states the inheritance rule rather than adding a second toggle.
+  assert.match(html, /Auto Caption writes one per video during preparation/);
+  // Auto Music: staged through the SAME endpoint the classic form used.
+  assert.match(html, /id="auto-music"/);
+  assert.match(html, /fetch\('\/api\/auto-caption', \{ method: 'POST'/);
+  assert.match(html, /body\.append\('autoMusic', '1'\)/);
+  // Already-hosted media, collapsed behind a disclosure.
+  assert.match(html, /id="publicMediaUrl"/);
+  assert.match(html, /<details id="media-url-disclosure"/);
+  // Provider metadata.
+  assert.match(html, /id="youtubeTitle"/);
+  assert.match(html, /id="youtubeDescription"/);
+});
+
+test('an unconfigured capability is stated honestly instead of offered', () => {
+  const noMusic = renderComposer({ autoMusicConfigured: false });
+  assert.doesNotMatch(noMusic, /id="auto-music"/, 'no control for a service that cannot run');
+
+  const noCaption = renderComposer({ autoCaptionConfigured: false });
+  assert.match(noCaption, /Auto Caption isn’t configured/);
+  assert.doesNotMatch(noCaption, /Auto Caption writes one per video/);
+});
+
+test('provider fields stay contextual and inherit by default', () => {
+  const html = renderComposer();
+  // Hidden until a YouTube destination is actually selected.
+  assert.match(html, /id="youtube-fields" class="provider-fields hidden"/);
+  assert.match(html, /youtubeFields\.classList\.toggle\('hidden', !wantsYouTube\)/);
+  // The title is never derived from the caption, and blocks readiness when missing.
+  assert.match(html, /never copied from the caption/i);
+  assert.match(html, /youtubeTitleOk = !wantsYouTube \|\| Boolean\(youtubeTitle && youtubeTitle\.value\.trim\(\)\)/);
+  // Only sent when that provider is a destination.
+  assert.match(html, /if \(youtubeSelected\(\)\) \{[\s\S]{0,200}data\.append\('youtubeTitle'/);
+});
+
+test('a prepared music derivative can never outlive the file it was made from', () => {
+  const html = renderComposer();
+  // Tokens are keyed by name+size and pruned when the file list changes.
+  assert.match(html, /function fileKey\(file\) \{ return file\.name \+ ':' \+ file\.size; \}/);
+  assert.match(html, /musicTokens = live;/);
+  // Readiness waits for staging rather than submitting a half-prepared draft.
+  assert.match(html, /&& !musicPending/);
+});
+
 test('the composer creates work and never reports on it', () => {
   const html = renderComposer();
   // History, runs, evidence and operational detail belong to the dashboard.
@@ -379,9 +430,20 @@ function makeWorld({ planId = 'legacy_full_access', entitlements = null } = {}) 
         : [{ accountId: defaults.accountId, tiktokOpenId: defaults.tiktokOpenId, username: defaults.username, soundMode: defaults.soundMode }];
       const sources = Array.isArray(files) && files.length > 0 ? files : [null];
       const created = [];
+      // Mirrors storage.addUploadedPosts: a prepared Auto Music derivative is
+      // matched to its own source by exact name+size, and a list is accepted so
+      // one submission can stage a derivative per file.
+      const preparedCandidates = Array.isArray(defaults.preparedMedia)
+        ? defaults.preparedMedia
+        : (defaults.preparedMedia ? [defaults.preparedMedia] : []);
       for (const target of targets) {
         for (let sourceIdx = 0; sourceIdx < sources.length; sourceIdx += 1) {
           const file = sources[sourceIdx];
+          const prepared = file
+            ? (preparedCandidates.find((candidate) => candidate
+              && String(candidate.originalName || '') === String(file.originalname || '')
+              && Number(candidate.originalSize || 0) === Number(file.size || 0)) || null)
+            : null;
           const post = postFromDoc({
             id: `post-${++sequence}`,
             data: () => ({
@@ -392,6 +454,9 @@ function makeWorld({ planId = 'legacy_full_access', entitlements = null } = {}) 
               mediaType: 'video',
               mediaUrl: `https://cdn.example.com/${target.accountId}/${file ? file.originalname : 'url'}`,
               caption: defaults.caption, hashtags: defaults.hashtags, soundMode: target.soundMode,
+              autoMusicApplied: Boolean(prepared),
+              musicTrackId: prepared ? String(prepared.trackId || '') : '',
+              providerMetadata: defaults.providerMetadata || null,
               scheduledAt: null, status: 'pending', approvedAt: null, approvedBy: null,
               createdAt: { toDate: () => new Date(now) }, updatedAt: { toDate: () => new Date(now) },
               batchId: defaults.batchId || '',
@@ -716,6 +781,174 @@ test('re-submitting the same composed draft restores it instead of duplicating i
   assert.equal(replay.replayed, true, 'the durable draft is restored, not recreated');
   assert.equal(replay.batch.batchId, first.batch.batchId);
   assert.equal(world.posts.length, 1, 'no second copy of the work');
+});
+
+// ── Absorbed capabilities reach the canonical command path (P1) ───────────
+
+test('a public media URL is accepted as the one alternative media source', async () => {
+  const world = makeWorld();
+  const result = await world.batchService.createBatch(websiteContext(), {
+    ...COMPOSED, intakeKey: 'url-source',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    mediaUrl: 'https://cdn.example.com/already-hosted.mp4',
+    files: []
+  });
+
+  assert.equal(result.items.length, 1, 'a URL contributes exactly one source item');
+  assert.equal(result.batch.videoCount, 1);
+  assert.notEqual(result.items[0].approved, true, 'still a draft behind the approval gate');
+
+  // Files and a URL together are ambiguous and refused rather than guessed.
+  await assert.rejects(
+    world.batchService.createBatch(websiteContext(), {
+      ...COMPOSED, intakeKey: 'both-sources',
+      destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+      mediaUrl: 'https://cdn.example.com/x.mp4',
+      files: [uploadFile('one.mp4')]
+    }),
+    (error) => {
+      assert.equal(error.code, 'ambiguous_media_source');
+      return true;
+    }
+  );
+
+  // Neither source at all is still refused.
+  await assert.rejects(
+    world.batchService.createBatch(websiteContext(), {
+      ...COMPOSED, intakeKey: 'no-source',
+      destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+      files: []
+    }),
+    /at least one video or image, or provide a public media URL/
+  );
+});
+
+test('an Auto Music derivative replaces only the source it was rendered from', async () => {
+  const world = makeWorld();
+  const original = uploadFile('with-music.mp4');
+  const untouched = uploadFile('plain.mp4');
+  const result = await world.batchService.createBatch(websiteContext(), {
+    ...COMPOSED, intakeKey: 'music',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [original, untouched],
+    // Shaped exactly as autoMusic.verifyPreparedMediaToken resolves it.
+    preparedMedia: [{
+      originalName: 'with-music.mp4',
+      originalSize: original.size,
+      trackId: 'track-1',
+      file: { path: '/tmp/mixed.mp4', originalname: 'mixed.mp4', size: 4096, mimetype: 'video/mp4' }
+    }]
+  });
+
+  assert.equal(result.items.length, 2);
+  const byName = new Map(result.items.map((item) => [item.originalName, item]));
+  assert.equal(byName.get('with-music.mp4').autoMusicApplied, true, 'the matched source got its derivative');
+  assert.notEqual(byName.get('plain.mp4').autoMusicApplied, true, 'an unmatched source is untouched');
+});
+
+test('a stale or mismatched derivative never substitutes the wrong media', async () => {
+  const world = makeWorld();
+  const result = await world.batchService.createBatch(websiteContext(), {
+    ...COMPOSED, intakeKey: 'music-mismatch',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('real.mp4')],
+    // Name and size that match nothing in this submission.
+    preparedMedia: [{
+      originalName: 'some-other-video.mp4',
+      originalSize: 999999,
+      file: { path: '/tmp/other.mp4', originalname: 'other.mp4', size: 10, mimetype: 'video/mp4' }
+    }]
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.notEqual(result.items[0].autoMusicApplied, true, 'the original upload is used, never another file');
+  assert.equal(result.items[0].originalName, 'real.mp4');
+});
+
+// ── Repeated-use readiness (P1 §13) ──────────────────────────────────────
+
+test('the canonical flow supports repeated use without duplicating durable state', async () => {
+  const world = makeWorld();
+  const drafts = [];
+
+  // 1. Single account.
+  drafts.push(await world.batchService.createBatch(websiteContext(), {
+    ...COMPOSED, intakeKey: 'run-1-single',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    caption: 'first', files: [uploadFile('r1.mp4')]
+  }));
+
+  // 2. Multi account.
+  drafts.push(await world.batchService.createBatch(websiteContext(), {
+    ...COMPOSED, intakeKey: 'run-2-multi',
+    destinations: [
+      { provider: 'tiktok', accountId: 'account-a' },
+      { provider: 'tiktok', accountId: 'account-b' },
+      { provider: 'tiktok', accountId: 'account-c' }
+    ],
+    caption: 'second', files: [uploadFile('r2.mp4')]
+  }));
+
+  // 3. Provider-specific / advanced: an already-hosted source.
+  drafts.push(await world.batchService.createBatch(websiteContext(), {
+    ...COMPOSED, intakeKey: 'run-3-url',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    caption: 'third', mediaUrl: 'https://cdn.example.com/hosted.mp4', files: []
+  }));
+
+  assert.equal(drafts.length, 3);
+  assert.deepEqual(drafts.map((d) => d.items.length), [1, 3, 1]);
+  assert.equal(new Set(drafts.map((d) => d.batch.batchId)).size, 3, 'three distinct durable records');
+
+  // Every draft is observable as work, and none of it published.
+  const listed = await world.batchService.listBatches(websiteContext());
+  for (const draft of drafts) {
+    assert.ok(listed.batches.some((batch) => batch.batchId === draft.batch.batchId), 'draft appears in work history');
+  }
+  assert.equal(world.posts.length, 5, '1 + 3 + 1 durable drafts');
+  assert.ok(world.posts.every((post) => post.approvedAt === null), 'nothing is approved');
+  assert.ok(world.posts.every((post) => post.status === 'scheduled'), 'nothing published');
+
+  // Replaying every one of them adds nothing.
+  for (const [key, input] of [
+    ['run-1-single', { destinations: [{ provider: 'tiktok', accountId: 'account-a' }], files: [uploadFile('r1.mp4')] }],
+    ['run-3-url', { destinations: [{ provider: 'tiktok', accountId: 'account-a' }], mediaUrl: 'https://cdn.example.com/hosted.mp4', files: [] }]
+  ]) {
+    const replay = await world.batchService.createBatch(websiteContext(), { ...COMPOSED, intakeKey: key, ...input });
+    assert.equal(replay.replayed, true, `${key} restored rather than recreated`);
+  }
+  assert.equal(world.posts.length, 5, 'replay created no additional durable state');
+});
+
+test('a deterministic validation failure is visible and leaves the flow recoverable', async () => {
+  const world = makeWorld();
+
+  // Inject one deterministic failure: a destination that is not connected.
+  await assert.rejects(
+    world.batchService.createBatch(websiteContext(), {
+      ...COMPOSED, intakeKey: 'failure-run',
+      destinations: [{ provider: 'tiktok', accountId: 'account-does-not-exist' }],
+      files: [uploadFile('f.mp4')]
+    }),
+    (error) => {
+      assert.equal(error.name, 'BatchServiceError');
+      assert.equal(error.code, 'destination_unavailable');
+      assert.match(error.message, /not connected and publishing-ready/);
+      return true;
+    }
+  );
+  assert.equal(world.posts.length, 0, 'a rejected submission leaves no partial durable state');
+
+  // …and the very same intakeKey still works once the input is corrected, so a
+  // failure is recoverable rather than a poisoned slot.
+  const recovered = await world.batchService.createBatch(websiteContext(), {
+    ...COMPOSED, intakeKey: 'failure-run',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('f.mp4')]
+  });
+  assert.equal(recovered.replayed, false);
+  assert.equal(recovered.items.length, 1);
+  assert.notEqual(recovered.items[0].approved, true);
 });
 
 // ─────────────────────────────────────────────────────────────────────────

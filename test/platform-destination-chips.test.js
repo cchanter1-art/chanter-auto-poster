@@ -130,6 +130,8 @@ function renderIntake(overrides = {}) {
       : countSelectableAccounts(groups),
     accountsError: overrides.accountsError || '',
     capabilities: { ...FULL_CAPABILITIES, ...(overrides.capabilities || {}) },
+    autoCaptionConfigured: overrides.autoCaptionConfigured !== false,
+    autoMusicConfigured: overrides.autoMusicConfigured !== false,
     composeDefaults: { maxItems: 30, safetyBufferMinutes: 10 }
   }, { filename: intakeViewPath });
 }
@@ -220,8 +222,9 @@ test('empty selection blocks submission and the review step names what is missin
   assert.match(html, /accountsOk = setStep\('accounts', destinations\.length > 0/);
   // …and the Review step says which step is unsatisfied rather than failing mutely.
   assert.match(html, /'Επιλέξτε λογαριασμό'/);
-  // Belt and braces: a keyboard submit with an empty selection cannot post.
-  assert.match(html, /if \(selectedFiles\.length === 0 \|\| destinations\.length === 0\) return;/);
+  // Belt and braces: a keyboard submit with an empty selection cannot post,
+  // whichever media source is in use.
+  assert.match(html, /if \(\(selectedFiles\.length === 0 && !usingUrlSource\(\)\) \|\| destinations\.length === 0\) return;/);
 });
 
 test('the form only appears when at least one account is actually selectable', () => {

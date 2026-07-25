@@ -685,3 +685,24 @@ textarea { resize: vertical; min-height: 64px; }
 .review-todo { color: var(--text-faint); }
 
 .file-list li .btn-quiet { padding: 2px 8px; }
+
+/* Provider-specific metadata, revealed only when that provider is a selected
+   destination. Set apart from the shared caption so inheritance stays obvious. */
+.provider-fields {
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 14px;
+  margin: 4px 0 14px;
+}
+.provider-fields-title {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.provider-fields .form-row { margin-bottom: 10px; }
+.provider-fields .section-note { margin-top: 4px; }
+
+#media-url-disclosure { margin-bottom: 14px; }
+#media-url-disclosure input { margin-top: 6px; }

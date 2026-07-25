@@ -166,30 +166,18 @@ test('multi-channel scheduling end-to-end at the route layer', async (t) => {
   const pageHtml = await pageResponse.text();
   assert.equal(pageResponse.status, 200);
 
-  // Only connected TikTok channels are rendered as selectable targets.
-  assert.match(pageHtml, /Target Publishing Channels/);
-  assert.match(pageHtml, /name="targetChannels"[^>]*value="chanter-open-id"/);
-  assert.match(pageHtml, /name="targetChannels"[^>]*value="cdwarrior-open-id"/);
+  // Connected channels are still IDENTIFIED here — the console owns provider
+  // state. What it no longer does is offer them as post targets: destination
+  // selection is a composer concern and moved there with the intake form.
   assert.match(pageHtml, /@__chanter/);
   assert.match(pageHtml, /@_cdwarrior/);
-  assert.doesNotMatch(
-    pageHtml,
-    /<input[^>]*name="targetChannels"[^>]*value="retired-open-id"[^>]*\/>/,
-    'disconnected channels are not target controls'
-  );
-  assert.match(
-    pageHtml,
-    /class="btn btn-primary btn-create"[^>]*data-provider-ready="true"/,
-    'TikTok-only pages preserve initial submit readiness without a provider switcher'
-  );
-  // The active channel is pre-selected and marked.
-  const activeOption = pageHtml.match(/<input[^>]*value="chanter-open-id"[^>]*\/>/);
-  assert.ok(activeOption);
-  assert.match(activeOption[0], /checked/);
-  assert.match(pageHtml, /Active channel/);
-  assert.match(pageHtml, /Select all connected/);
-  // Per-channel preflight container is rendered.
-  assert.match(pageHtml, /data-preflight-channels/);
+  assert.doesNotMatch(pageHtml, /Target Publishing Channels/, 'no destination picker on the dashboard');
+  assert.doesNotMatch(pageHtml, /name="targetChannels"/, 'connected channels are not post targets here');
+  assert.doesNotMatch(pageHtml, /Select all connected/);
+  assert.doesNotMatch(pageHtml, /data-preflight-channels/, 'per-channel intake readiness left with the form');
+  assert.doesNotMatch(pageHtml, /btn-create/, 'no creation submit control remains');
+  // One way to create, and it is the canonical composer.
+  assert.match(pageHtml, /href="\/platform\/compose"/);
 
   // Release Queue shows channel ownership, campaign, and job id per item.
   assert.match(pageHtml, /@__chanter/);

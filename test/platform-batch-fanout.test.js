@@ -124,6 +124,9 @@ function makeWorld({ nowMs = BASE_NOW, failSchedulePostForProvider = null } = {}
               caption: defaults.caption,
               hashtags: defaults.hashtags,
               soundMode: target.soundMode,
+              // Mirrors the real contract: bounded provider metadata is stored
+              // as supplied (storage locks YouTube privacy/notify at write time).
+              providerMetadata: defaults.providerMetadata || null,
               scheduledAt: null,
               status: 'pending',
               approvedAt: null,
@@ -360,7 +363,11 @@ test('a disconnected/unknown destination is rejected before any post is created'
   assert.equal(world.posts.length, 0, 'no partial creation for a rejected destination list');
 });
 
-test('YouTube cannot be selected at batch intake — it still requires a per-item title in review', async () => {
+// YouTube's substantive rule is unchanged: a title must be HUMAN-ENTERED, never
+// derived from a caption. What changed is only when it can be supplied — the
+// canonical composer collects it at intake. These three cases pin the whole
+// rule, including the ambiguity a single title would create across many videos.
+test('YouTube at intake is refused without a human-entered title', async () => {
   const world = makeWorld();
   await assert.rejects(
     world.batchService.createBatch(websiteContext(), {
@@ -371,9 +378,62 @@ test('YouTube cannot be selected at batch intake — it still requires a per-ite
       ],
       files: [uploadFile('a.mp4')]
     }),
-    /cannot be selected at batch intake/
+    (error) => {
+      assert.equal(error.code, 'provider_not_batchable');
+      assert.match(error.message, /requires a human-entered title/);
+      return true;
+    }
+  );
+  assert.equal(world.posts.length, 0, 'nothing durable is created by the refusal');
+
+  // A blank/whitespace title is not a title.
+  await assert.rejects(
+    world.batchService.createBatch(websiteContext(), {
+      ...FANOUT_INTAKE,
+      destinations: [{ provider: 'youtube', accountId: 'UC-chanter' }],
+      youtube: { title: '   ' },
+      files: [uploadFile('a.mp4')]
+    }),
+    /requires a human-entered title/
   );
   assert.equal(world.posts.length, 0);
+});
+
+test('one YouTube title may not silently describe several videos', async () => {
+  const world = makeWorld();
+  await assert.rejects(
+    world.batchService.createBatch(websiteContext(), {
+      ...FANOUT_INTAKE,
+      destinations: [{ provider: 'youtube', accountId: 'UC-chanter' }],
+      youtube: { title: 'One title', description: 'd' },
+      files: [uploadFile('a.mp4'), uploadFile('b.mp4')]
+    }),
+    (error) => {
+      assert.equal(error.code, 'provider_title_ambiguous');
+      return true;
+    }
+  );
+  assert.equal(world.posts.length, 0);
+});
+
+test('YouTube at intake succeeds with a typed title and carries it to the draft', async () => {
+  const world = makeWorld();
+  const result = await world.batchService.createBatch(websiteContext(), {
+    ...FANOUT_INTAKE,
+    destinations: [{ provider: 'youtube', accountId: 'UC-chanter' }],
+    youtube: { title: 'Composed title', description: 'Composed description' },
+    files: [uploadFile('a.mp4')]
+  });
+
+  assert.equal(result.items.length, 1);
+  const item = result.items[0];
+  assert.equal(item.provider, 'youtube');
+  assert.equal(item.providerMetadata.youtube.title, 'Composed title');
+  assert.equal(item.providerMetadata.youtube.description, 'Composed description');
+  // The title is never taken from the caption.
+  assert.notEqual(item.providerMetadata.youtube.title, item.caption);
+  // Still a draft behind the human approval gate.
+  assert.notEqual(item.approved, true);
 });
 
 test('idempotent repeated fan-out intake: same intakeKey never multiplies destination copies', async () => {

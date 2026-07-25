@@ -218,16 +218,20 @@ test('Max Scheduler campaign creation and Release Queue visibility', async (t) =
   assert.match(defaultHtml, /Campaign cmpAAAAA/);
   assert.match(defaultHtml, /class="btn btn-primary" href="\?queueView=all"/);
   assert.doesNotMatch(defaultHtml, /Showing jobs for active channel only/);
-  // Release Plan intake fields are present.
-  assert.match(defaultHtml, /name="startDate"/);
-  assert.match(defaultHtml, /name="startTime"/);
-  assert.match(defaultHtml, /name="offsetMinutes"/);
-  assert.match(defaultHtml, /name="repeatMode"/);
-  assert.match(defaultHtml, /name="approveSeries"/);
-  assert.match(defaultHtml, /Approve the full daily series now/);
-  assert.match(defaultHtml, /name="endDate"/);
-  assert.match(defaultHtml, /name="timezoneName"/);
-  assert.match(defaultHtml, /value="daily">Every day/);
+  // The console is a DASHBOARD: it observes work, it does not create it. The
+  // intake fields that used to live here moved to the canonical composer, so
+  // their absence is the contract now — asserted by name so a reintroduced
+  // second composer fails loudly rather than quietly reappearing.
+  for (const field of ['startDate', 'startTime', 'offsetMinutes', 'repeatMode', 'approveSeries', 'endDate']) {
+    assert.doesNotMatch(defaultHtml, new RegExp(`name="${field}"`), `${field} must not be composed from the dashboard`);
+  }
+  assert.doesNotMatch(defaultHtml, /class="upload-form"/, 'no intake form remains');
+  assert.doesNotMatch(defaultHtml, /action="\/upload"/, 'no creation submit control remains');
+  assert.doesNotMatch(defaultHtml, /data-media-upload/, 'no upload input remains');
+  assert.doesNotMatch(defaultHtml, /Approve the full daily series now/);
+  // …and there is exactly one way to reach the composer from here.
+  assert.match(defaultHtml, /href="\/platform\/compose"/);
+  assert.equal((defaultHtml.match(/data-compose-link/g) || []).length, 1, 'one Compose action');
 
   // ── Active Channel mode: only the active channel's job, plus the
   // required explanatory copy ─────────────────────────────────────────────
@@ -271,6 +275,13 @@ test('Max Scheduler campaign creation and Release Queue visibility', async (t) =
     method: 'POST', redirect: 'manual', headers: { Cookie: adminCookie }, body: dualBody
   });
   assert.equal(dualResponse.status, 302);
+  // /upload is now a DEPRECATED compatibility adapter: it still works exactly
+  // as before — same service path, same entitlements, same approval gate — and
+  // it says so to machine callers, naming the surface that replaced it. It is
+  // never a redirect: a redirected POST would silently discard the body.
+  assert.equal(dualResponse.headers.get('deprecation'), 'true', 'the adapter announces its deprecation');
+  assert.match(dualResponse.headers.get('link') || '', /<\/platform\/compose>;\s*rel="successor-version"/);
+  assert.notEqual(dualResponse.headers.get('location'), '/platform/compose', 'a POST is adapted, never redirected');
   assert.equal(applyExplicitScheduleCalls.length, 1, 'Max Scheduler path was used instead of autoSchedulePosts');
   assert.equal(autoScheduleCalls.length, 0);
   const firstPlan = applyExplicitScheduleCalls[0].plan;
@@ -494,41 +505,29 @@ test('Max Scheduler campaign creation and Release Queue visibility', async (t) =
   assert.equal(addUploadedPostsCalls.length, callsBeforeUnknownResult + 1, 'the uncertain response corresponds to a committed queue item');
   assert.ok(queueJobs.some((job) => job.id === unknownResultPayload.createdPostId));
 
-  // The intake page ships the inline feedback surface the XHR path drives.
+  // The console is now a dashboard. What it must still do is OBSERVE work
+  // correctly, so the queue-refresh guarantees the removed intake form used to
+  // trigger are asserted here in their own right — they are queue behaviour,
+  // not intake behaviour, and they outlived the form.
   const intakeHtml = await (await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } })).text();
-  assert.match(intakeHtml, /data-submit-feedback/);
-  assert.match(intakeHtml, /data-upload-progress-fill/);
-  assert.match(intakeHtml, /chanter:queue-refresh/);
   for (const [, inlineScript] of intakeHtml.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
     if (inlineScript.trim()) new vm.Script(inlineScript, { filename: 'rendered-index-inline.js' });
   }
 
-  const formStart = intakeHtml.indexOf('<form class="upload-form"');
-  const formEnd = intakeHtml.indexOf('</form>', formStart);
-  assert.ok(formStart >= 0 && formEnd > formStart, 'upload form renders');
-  const uploadFormHtml = intakeHtml.slice(formStart, formEnd);
-  const fieldTag = (name) => {
-    const match = uploadFormHtml.match(new RegExp(`<(?:input|textarea|select)\\b[^>]*\\bname="${name}"[^>]*>`, 'i'));
-    assert.ok(match, `${name} field renders`);
-    return match[0];
-  };
-
-  for (const name of ['images', 'publicMediaUrl', 'caption', 'startDate', 'startTime', 'endDate', 'autoMusicToken']) {
-    assert.match(fieldTag(name), /data-reset-after-submit/, `${name} is cleared after confirmed success`);
-  }
-  for (const name of ['targetChannels', 'repeatMode', 'offsetMinutes', 'hashtags', 'autoCaption', 'autoMusic']) {
-    assert.doesNotMatch(fieldTag(name), /data-reset-after-submit/, `${name} remains a reusable session default`);
+  // No composer survives here — not visibly, and not hidden in the DOM.
+  assert.doesNotMatch(intakeHtml, /<form[^>]*class="upload-form"/, 'no intake form remains');
+  assert.doesNotMatch(intakeHtml, /data-submit-feedback|data-upload-progress-fill/, 'no intake submit surface remains');
+  assert.doesNotMatch(intakeHtml, /<input[^>]*type="file"/, 'no upload control remains anywhere in the DOM');
+  assert.doesNotMatch(intakeHtml, /data-preflight/, 'the intake readiness panel left with the form it reviewed');
+  for (const name of ['images', 'autoMusicToken', 'autoCaption', 'autoMusic', 'targetChannels']) {
+    assert.doesNotMatch(intakeHtml, new RegExp(`name="${name}"`), `${name} is no longer composed here`);
   }
 
-  assert.match(intakeHtml, /if \(submitting\) return;/, 'rapid duplicate submits are blocked while one request is active');
-  assert.match(intakeHtml, /scheduling result is unknown\. Check the Release Queue before retrying/, 'transport failures do not claim a false negative');
-  assert.doesNotMatch(intakeHtml, /nothing was scheduled/, 'ambiguous transport failures cannot invite a blind duplicate retry');
-  assert.match(intakeHtml, /if \(payload\.resultUnknown\)[\s\S]{0,360}chanter:queue-refresh/, 'uncertain JSON results trigger a safe queue check before retry');
-  assert.match(intakeHtml, /could not be confirmed[\s\S]{0,180}chanter:queue-refresh/, 'unknown responses trigger a safe queue check before retry');
+  // Queue observation, unchanged.
+  assert.match(intakeHtml, /chanter:queue-refresh/);
   assert.match(intakeHtml, /loadQueueView\(window\.location\.href, \{ navigateOnFailure: false \}\)/, 'background queue refresh cannot force a page reload');
   assert.match(intakeHtml, /requestVersion !== queueRequestVersion/, 'only the newest overlapping queue refresh can replace the live queue');
-  assert.match(intakeHtml, /Ready for the next video\./);
-  assert.match(intakeHtml, /\.schedule-plan-inputs \{ grid-template-columns: 1fr; \}/, 'exact scheduling fields stack on narrow screens');
+  assert.match(intakeHtml, /data-queue-view-region/, 'the release queue region still renders');
 
   const creativeDetails = intakeHtml.match(/<details id="creative-tools"[^>]*>/);
   assert.ok(creativeDetails, 'Creative Engine renders as a secondary disclosure');

@@ -145,11 +145,13 @@ test('image intake is refused on every creation path; video intake passes', asyn
   const adminCookie = String(loginResponse.headers.get('set-cookie') || '').split(';')[0];
   assert.match(adminCookie, /^chanter_admin_session=/);
 
-  // ── Admin file picker ships video-only hints ─────────────────────────────
+  // ── The console no longer picks files at all ─────────────────────────────
+  // The video-only RULE is server-side and unchanged (proven below); what left
+  // this page is the picker, along with the rest of the intake form.
   const intakeHtml = await (await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } })).text();
-  assert.match(intakeHtml, /accept="video\/mp4,video\/quicktime,video\/webm"/);
+  assert.doesNotMatch(intakeHtml, /<input[^>]*type="file"/, 'no file picker remains on the dashboard');
+  assert.doesNotMatch(intakeHtml, /accept="video/);
   assert.doesNotMatch(intakeHtml, /accept="image/);
-  assert.match(intakeHtml, /video-only/i);
 
   // ── Admin: image file is refused (server-side MIME check) ────────────────
   const imageUpload = await fetch(`${baseUrl}/upload`, {

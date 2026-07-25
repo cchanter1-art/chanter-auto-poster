@@ -1046,11 +1046,31 @@ router.post(
   })
 );
 
+// DEPRECATED COMPATIBILITY ADAPTER.
+//
+// The customer UI that posted here is gone: creation lives at
+// /platform/compose. This route is retained rather than deleted because it is
+// still a live, exercised API contract (video-only media policy, multi-channel
+// fan-out, Max Scheduler offsets, recurring-daily series, duplicate-submit and
+// unknown-result handling), and because recurring-daily has no composer
+// equivalent yet — deleting it would remove working behaviour, not dead code.
+//
+// It is an adapter, not a second implementation: it resolves accounts, projects
+// the multipart body onto applicationService.schedulePost, and formats the
+// reply. Entitlements, idempotency, validation, scheduling and the human
+// approval gate are all schedulePost's, identical to the canonical path.
+//
+// Never redirect a POST here — a redirect would silently drop the body.
+//
 // Provider selection lives in the multipart body, which only exists after
 // multer runs — so the account gate happens inside the handler. TikTok
 // keeps its existing connected-account requirement and message; YouTube
-// targets one connected channel chosen in the form.
+// targets one connected channel supplied by the caller.
 router.post('/upload', requireAdminPage, uploadCampaignMedia, asyncRoute(async (req, res) => {
+  // RFC 8594-style signal: honest to machine callers without breaking any of
+  // them. The canonical surface is named so a caller knows where to go.
+  res.set('Deprecation', 'true');
+  res.set('Link', '</platform/compose>; rel="successor-version"');
   await resolveWebsiteCommercialContext(req);
   const userId = resolveUserId(req);
   const files = req.files || [];

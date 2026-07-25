@@ -29,19 +29,23 @@ const { createAutoPosterWorkProvider } = require('./platformAutoPosterProvider')
 const { createOperatorWorkProvider } = require('./platformOperatorProvider');
 const { readConnectedHealth } = require('./runtimeConnectedHealth');
 const providers = require('./providers');
+const autoMusic = require('./autoMusic');
+const autoCaption = require('./autoCaption');
 const { groupDestinationsByProvider, countSelectableAccounts } = require('./destinationChips');
 const { requireAdminApi, requireAdminPage, resolveUserId } = require('./auth');
 const { isSupportedBatchUploadFile, BATCH_MEDIA_UPLOAD_MESSAGE } = require('./mediaPolicy');
 
-// Which connected providers can actually be selected at bulk intake. YouTube is
-// connected and publishing-ready but not choosable here: it needs a
-// human-entered per-video title that cannot exist yet at bulk intake, so it is
-// shown grouped-but-disabled and reached per item during review instead. This
-// mirrors batchService.createBatch's own YouTube guard (the hard backstop).
-function isIntakeSelectableProvider(provider) {
-  return provider !== providers.PROVIDER_YOUTUBE;
+// Every connected, publishing-ready provider is selectable in the canonical
+// composer. YouTube used to be shown grouped-but-disabled because it needs a
+// human-entered per-video title that bulk intake had no way to collect; the
+// composer's Caption step now collects it, so the reason no longer holds.
+// The substance of the rule is unchanged and still enforced server-side by
+// batchService.createBatch: a YouTube destination without a typed title is
+// refused, and one title may not describe several videos.
+function isIntakeSelectableProvider() {
+  return true;
 }
-const INTAKE_UNAVAILABLE_REASON = 'YouTube requires a title for each video. Assign it during review.';
+const INTAKE_UNAVAILABLE_REASON = '';
 
 const router = express.Router();
 
@@ -114,6 +118,35 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+// Auto Music tokens staged by POST /api/auto-caption, resolved back into the
+// prepared derivatives storage already knows how to match to their own source
+// file. Identical trust model to the classic intake path: an invalid, expired
+// or mismatched token is never fatal — it is dropped with a warning and the
+// ORIGINAL upload is used, so music can never silently substitute the wrong
+// media. Verification is per file, so one token can only ever claim one source.
+function resolvePreparedMediaList(tokens, userId, files) {
+  const staged = [];
+  for (const token of Array.isArray(tokens) ? tokens : []) {
+    if (!String(token || '').trim()) continue;
+    let matched = null;
+    for (const file of files) {
+      try {
+        const prepared = autoMusic.verifyPreparedMediaToken(token, { userId, file });
+        if (prepared) { matched = prepared; break; }
+      } catch (error) {
+        console.warn('[auto-music] prepared media verification failed; using original upload', {
+          code: (error && error.code) || 'PREPARED_MEDIA_INVALID'
+        });
+        matched = null;
+        break;
+      }
+    }
+    if (matched) staged.push(matched);
+    else console.warn('[auto-music] prepared media token was invalid or expired; using original upload');
+  }
+  return staged;
 }
 
 async function removeTemporaryUploads(files) {
@@ -316,6 +349,10 @@ router.get('/platform/compose', requireAdminPage, asyncRoute(async (req, res) =>
     selectableCount,
     accountsError,
     capabilities,
+    // Honest availability, not a promise: each control renders inert when its
+    // service is unconfigured rather than failing at submit time.
+    autoCaptionConfigured: autoCaption.hasConfiguredCaptionProvider(),
+    autoMusicConfigured: autoMusic.isAutoMusicConfigured(),
     composeDefaults: {
       maxItems: capabilities.maxItemsPerDraft,
       safetyBufferMinutes: config.batchIntake.safetyBufferMinutes
@@ -410,6 +447,20 @@ router.post('/api/platform/batches', requireAdminApi, uploadBatchMedia, asyncRou
       // discarded on the way to the service that already accepted it.
       caption: req.body.caption,
       hashtags: req.body.hashtags,
+      // Already-hosted media as an alternative to uploading; the service
+      // refuses both sources at once and validateMedia keeps URLs video-only.
+      mediaUrl: req.body.publicMediaUrl,
+      // Auto Music derivatives staged before submit.
+      preparedMedia: resolvePreparedMediaList(
+        parseJsonArray(req.body.autoMusicTokens),
+        resolveUserId(req),
+        files
+      ),
+      // Provider metadata, collected contextually by the composer.
+      youtube: {
+        title: req.body.youtubeTitle,
+        description: req.body.youtubeDescription
+      },
       scheduleMode: req.body.scheduleMode,
       startDate: req.body.startDate,
       startTime: req.body.startTime,

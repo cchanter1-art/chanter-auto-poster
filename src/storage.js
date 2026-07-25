@@ -1469,10 +1469,18 @@ async function addUploadedPosts(userId, files, defaults = {}) {
       const file = sources[sourceIdx];
       const mediaType = file ? getUploadMediaType(file) : getPublicMediaType(fallbackUrl);
       const fileName = file ? getStoredFileName(file) : getPublicMediaName(fallbackUrl);
-      const preparedMedia = file && defaults.preparedMedia
-        && String(defaults.preparedMedia.originalName || '') === String(file.originalname || '')
-        && Number(defaults.preparedMedia.originalSize || 0) === Number(file.size || 0)
+      // Auto Music prepared derivatives, matched to the source they were
+      // rendered from by exact name+size. Classic single intake supplies one;
+      // the canonical composer can stage one per uploaded file, so a list is
+      // accepted too. The match is unchanged either way — a derivative can
+      // still only ever replace the exact file it was prepared from.
+      const preparedCandidates = Array.isArray(defaults.preparedMedia)
         ? defaults.preparedMedia
+        : (defaults.preparedMedia ? [defaults.preparedMedia] : []);
+      const preparedMedia = file
+        ? (preparedCandidates.find((candidate) => candidate
+          && String(candidate.originalName || '') === String(file.originalname || '')
+          && Number(candidate.originalSize || 0) === Number(file.size || 0)) || null)
         : null;
       let mediaUrl = fallbackUrl;
       let cloudinaryPublicId = '';

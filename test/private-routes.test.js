@@ -250,19 +250,23 @@ test('serves the AutoPoster page and dashboard at both private routes', async (t
   ]);
 
   assert.equal(autoPosterResponse.status, 200);
-  assert.match(autoPosterHtml, /Prepare Campaign/);
-  assert.match(autoPosterHtml, /data-auto-caption-toggle/);
-  assert.match(autoPosterHtml, /data-auto-music-toggle/);
-  assert.match(autoPosterHtml, /Turn on Auto Music/);
-  assert.match(autoPosterHtml, /Turn on Auto Caption/);
+  // Creation moved to the canonical composer; this page observes work only.
+  // Auto Caption and Auto Music went with it — they are intake capabilities.
+  assert.doesNotMatch(autoPosterHtml, /Prepare Campaign/);
+  assert.doesNotMatch(autoPosterHtml, /data-auto-caption-toggle/);
+  assert.doesNotMatch(autoPosterHtml, /data-auto-music-toggle/);
+  assert.doesNotMatch(autoPosterHtml, /Turn on Auto Music|Turn on Auto Caption/);
+  assert.match(autoPosterHtml, /href="\/platform\/compose"/, 'one creation action, pointing at the composer');
   assert.match(autoPosterHtml, /href="\/private\/autoposter\/dashboard"/);
   assert.match(autoPosterHtml, /account-a-history\.jpg/);
   assert.doesNotMatch(autoPosterHtml, /account-b-queue\.jpg/);
   assert.match(autoPosterHtml, /Connect Another Channel/);
   assert.match(autoPosterHtml, /Release Queue/);
   assert.match(autoPosterHtml, /Publishing Log/);
-  assert.match(autoPosterHtml, /data-preflight/);
-  assert.match(autoPosterHtml, /Run Preflight/);
+  // Preflight reviewed the intake form's readiness and left with it; the
+  // composer's own Review step is where readiness is stated now.
+  assert.doesNotMatch(autoPosterHtml, /data-preflight/);
+  assert.doesNotMatch(autoPosterHtml, /Run Preflight/);
   assert.match(autoPosterHtml, /Instagram: Not configured/);
   assert.match(autoPosterHtml, /Dry-run mode active/);
   assert.match(autoPosterHtml, /Add Meta API keys to enable Instagram publishing/);

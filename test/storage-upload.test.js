@@ -247,6 +247,61 @@ test('persists Cloudinary video URLs, enforces video-only intake, and keeps publ
   assert.equal(originalFallbackPost.autoMusicApplied, false);
   assert.equal(originalFallbackPost.mediaUrl, 'https://res.cloudinary.com/test/video/upload/original.mov');
 
+  // A LIST of prepared derivatives — what the canonical composer stages when
+  // several files are uploaded at once. Each one may only ever replace the
+  // exact source it was rendered from; an unmatched source keeps its original.
+  // Every upload succeeds again, so the only thing under test below is which
+  // file each source actually uploaded.
+  uploadBehavior = async (file) => ({
+    mediaUrl: `https://res.cloudinary.com/test/video/upload/${path.basename(file.path)}`,
+    publicId: `uploads/${path.basename(file.path)}`,
+    resourceType: 'video'
+  });
+  const listSourceAPath = path.join(tempDir, 'list-a.mov');
+  const listSourceBPath = path.join(tempDir, 'list-b.mov');
+  const listPreparedAPath = path.join(tempDir, 'list-a-prepared.mp4');
+  fs.writeFileSync(listSourceAPath, Buffer.from('list-source-a'));
+  fs.writeFileSync(listSourceBPath, Buffer.from('list-source-b-longer'));
+  fs.writeFileSync(listPreparedAPath, Buffer.from('list-prepared-a'));
+  const listSourceA = {
+    path: listSourceAPath, size: fs.statSync(listSourceAPath).size,
+    filename: 'list-a.mov', originalname: 'list-a.mov', mimetype: 'video/quicktime'
+  };
+  const listSourceB = {
+    path: listSourceBPath, size: fs.statSync(listSourceBPath).size,
+    filename: 'list-b.mov', originalname: 'list-b.mov', mimetype: 'video/quicktime'
+  };
+  const listPosts = await storage.addUploadedPosts('owner', [listSourceA, listSourceB], {
+    ...accountDefaults,
+    preparedMedia: [
+      {
+        file: {
+          path: listPreparedAPath, size: fs.statSync(listPreparedAPath).size,
+          filename: 'list-a-prepared.mp4', originalname: listSourceA.originalname, mimetype: 'video/mp4'
+        },
+        originalName: listSourceA.originalname,
+        originalSize: listSourceA.size,
+        trackId: 'track-list-a'
+      },
+      {
+        // Same name as B but a different size: not the same file, so it must
+        // NOT be substituted.
+        file: {
+          path: listPreparedAPath, size: 1,
+          filename: 'stale.mp4', originalname: listSourceB.originalname, mimetype: 'video/mp4'
+        },
+        originalName: listSourceB.originalname,
+        originalSize: listSourceB.size + 1,
+        trackId: 'track-stale'
+      }
+    ]
+  });
+  const listByName = new Map(listPosts.map((post) => [post.originalName, post]));
+  assert.equal(listByName.get('list-a.mov').autoMusicApplied, true, 'the exactly matched source is replaced');
+  assert.equal(listByName.get('list-a.mov').musicTrackId, 'track-list-a');
+  assert.equal(listByName.get('list-b.mov').autoMusicApplied, false, 'a size mismatch never substitutes media');
+  assert.equal(listByName.get('list-b.mov').musicTrackId, '');
+
   const restoredWebmPost = require('../src/postsMapper').postFromDoc({
     id: committed[0].ref.id,
     data: () => committed[0].data
@@ -277,7 +332,8 @@ test('persists Cloudinary video URLs, enforces video-only intake, and keeps publ
   });
   assert.equal(uploadCalls.length, callsBeforeUrlOnly);
   assert.equal(urlOnlyPost.mediaSource, 'public_url');
-  assert.equal(committed.length, 7);
+  // 7 from the original scenarios + 2 from the prepared-media list above.
+  assert.equal(committed.length, 9);
 
   const health = await storage.checkMediaStorageHealth({ writeTest: true });
   assert.deepEqual(health, {

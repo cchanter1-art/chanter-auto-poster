@@ -71,12 +71,17 @@ autoMusic.isAutoMusicConfigured = () => false;
 const { installCommercialFixture } = require('./helpers/commercial-fixture');
 installCommercialFixture(require('../src/commercialService'), storage);
 const routes = require('../src/routes');
+// The canonical composer is mounted alongside the console because YouTube
+// TARGET SELECTION moved there. Asserting it in this acceptance file keeps the
+// provider's end-to-end guarantee in one place instead of losing half of it.
+const platformRoutes = require('../src/platformRoutes');
 const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '..', 'src', 'views'));
 app.use(express.urlencoded({ extended: true }));
 app.use(attachUser);
 app.use(csrfOriginCheck);
+app.use('/', platformRoutes);
 app.use('/', routes);
 
 let server;
@@ -88,6 +93,16 @@ test.before(async () => {
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
 test.after(() => new Promise((resolve) => server.close(resolve)));
+
+async function renderComposer() {
+  const response = await fetch(`${baseUrl}/platform/compose`, { headers: { Cookie: adminCookie } });
+  assert.equal(response.status, 200);
+  return response.text();
+}
+
+function youtubeChips(html) {
+  return (html.match(/<input[^>]*class="destination-checkbox"[^>]*data-provider="youtube"[^>]*>/g) || []);
+}
 
 async function renderPage() {
   const response = await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } });
@@ -135,24 +150,29 @@ test('connected: safe channel identity, readiness, reauthorization state, and di
   assert.match(html, /Connected/);
   assert.match(html, /Ready to publish \(private uploads only\)/);
   assert.match(html, /action="\/disconnect\/youtube"/);
-  // Provider target selection appears once a channel is connected.
-  assert.match(html, /Target Provider/);
-  assert.match(html, /name="youtubeTitle"/);
-  assert.match(html, /Private \(locked\)/);
-  assert.match(html, /name="youtubeChannelId"/);
-  const youtubeTargetInputs = html.match(/<input\s+type="radio"\s+name="youtubeChannelId"[\s\S]*?\/>/g) || [];
-  assert.equal(youtubeTargetInputs.length, 1, 'one ready YouTube target is rendered once');
-  assert.match(youtubeTargetInputs[0], /value="UC-chanter"/);
-  assert.match(youtubeTargetInputs[0], /data-channel-provider="youtube"/);
-  assert.match(youtubeTargetInputs[0], /checked/, 'the sole YouTube target is selected automatically');
-  assert.doesNotMatch(youtubeTargetInputs[0], new RegExp(TIKTOK_ACCOUNT_ID), 'YouTube targets never contain TikTok identities');
-  assert.match(html, /data-provider-targets="youtube" hidden/);
-  assert.match(html, /data-provider-targets="tiktok"/);
-  assert.match(html, new RegExp(`name="targetChannels"[\\s\\S]*?value="${TIKTOK_ACCOUNT_ID}"`));
-  assert.match(html, /\[data-provider-targets\]\[hidden\][^}]*display:\s*none\s*!important/);
-  // Custody: the encrypted envelope never reaches the page.
-  assert.doesNotMatch(html, new RegExp(CANARY_ENVELOPE_CT));
-  assert.doesNotMatch(html, /CANARY-SITE-CLIENT-SECRET/);
+  // Target selection is no longer offered here — the console reports provider
+  // state, the composer chooses destinations.
+  assert.doesNotMatch(html, /Target Provider/);
+  assert.doesNotMatch(html, /name="youtubeChannelId"/);
+  assert.doesNotMatch(html, /name="youtubeTitle"/);
+
+  // …and it IS offered, once, in the canonical composer, carrying the same
+  // identity and the same locked-privacy statement.
+  const composer = await renderComposer();
+  const chips = youtubeChips(composer);
+  assert.equal(chips.length, 1, 'one ready YouTube destination is rendered once');
+  assert.match(chips[0], /value="youtube\|UC-chanter"/);
+  assert.doesNotMatch(chips[0], new RegExp(TIKTOK_ACCOUNT_ID), 'YouTube targets never contain TikTok identities');
+  assert.match(composer, /id="youtubeTitle"/, 'the human-entered title is collected in the composer');
+  assert.match(composer, /Private \(locked\)/);
+  // The title field is provider-contextual, not standing clutter.
+  assert.match(composer, /id="youtube-fields" class="provider-fields hidden"/);
+
+  // Custody: the encrypted envelope never reaches either page.
+  for (const page of [html, composer]) {
+    assert.doesNotMatch(page, new RegExp(CANARY_ENVELOPE_CT));
+    assert.doesNotMatch(page, /CANARY-SITE-CLIENT-SECRET/);
+  }
 });
 
 test('multiple YouTube accounts require explicit selection and exclude non-ready channels', async () => {
@@ -177,13 +197,17 @@ test('multiple YouTube accounts require explicit selection and exclude non-ready
     }
   );
 
-  const html = await renderPage();
-  const youtubeTargetInputs = html.match(/<input\s+type="radio"\s+name="youtubeChannelId"[\s\S]*?\/>/g) || [];
-  assert.equal(youtubeTargetInputs.length, 2, 'only publishing-ready YouTube accounts are targets');
-  youtubeTargetInputs.forEach((input) => assert.doesNotMatch(input, /checked/, 'multiple targets start unselected'));
-  assert.match(youtubeTargetInputs.map(String).join('\n'), /value="UC-chanter"/);
-  assert.match(youtubeTargetInputs.map(String).join('\n'), /value="UC-second"/);
-  assert.doesNotMatch(youtubeTargetInputs.map(String).join('\n'), /UC-not-ready/);
+  // The readiness filter is what matters, and it now guards the composer's
+  // destination list: a connected-but-not-publishing-ready channel is never a
+  // selectable target, however many channels exist.
+  const composer = await renderComposer();
+  const chips = youtubeChips(composer);
+  assert.equal(chips.length, 2, 'only publishing-ready YouTube accounts are targets');
+  const joined = chips.join('\n');
+  assert.match(joined, /value="youtube\|UC-chanter"/);
+  assert.match(joined, /value="youtube\|UC-second"/);
+  assert.doesNotMatch(joined, /UC-not-ready/, 'a channel without upload scope is not a destination');
+  chips.forEach((chip) => assert.doesNotMatch(chip, /\bchecked\b/, 'multiple targets start unselected'));
 
   youtubeAccounts.splice(1);
 });

@@ -45,6 +45,19 @@
               <input id="file-input" type="file" name="videos" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple style="display:none">
             </div>
             <ul id="file-list" class="file-list"></ul>
+            <details id="media-url-disclosure" class="advanced-schedule">
+              <summary>Ήδη online &middot; Already hosted</summary>
+              <label class="field-label" for="publicMediaUrl">Public media URL</label>
+              <input id="publicMediaUrl" type="url" placeholder="https://example.com/media.mp4">
+              <p class="section-note">Μόνο βίντεο μέσω HTTPS. Χρησιμοποιήστε είτε αρχεία είτε URL. &middot; HTTPS video only; use files or a URL, not both.</p>
+            </details>
+            <% if (autoMusicConfigured) { %>
+              <label class="toggle-row" id="auto-music-row">
+                <input type="checkbox" id="auto-music">
+                <span>Μουσική υπόκρουση &middot; Auto Music</span>
+              </label>
+              <p id="auto-music-status" class="section-note" aria-live="polite"></p>
+            <% } %>
           </section>
 
           <!-- 2 · Accounts -->
@@ -101,7 +114,14 @@
             <div class="form-row">
               <div>
                 <label class="field-label" for="caption">Λεζάντα &middot; Caption</label>
-                <textarea id="caption" rows="3" placeholder="Αφήστε το κενό για αυτόματη προετοιμασία"></textarea>
+                <textarea id="caption" rows="3" placeholder="<%= autoCaptionConfigured ? 'Αφήστε το κενό για αυτόματη προετοιμασία' : 'Γράψτε μια λεζάντα' %>"></textarea>
+                <p class="section-note" id="auto-caption-note">
+                  <% if (autoCaptionConfigured) { %>
+                    Κενή λεζάντα σημαίνει Auto Caption ανά βίντεο κατά την προετοιμασία. &middot; Left blank, Auto Caption writes one per video during preparation.
+                  <% } else { %>
+                    Το Auto Caption δεν είναι ρυθμισμένο. &middot; Auto Caption isn’t configured; write a caption here.
+                  <% } %>
+                </p>
               </div>
             </div>
             <div class="form-row">
@@ -132,6 +152,25 @@
             <% } else { %>
               <p class="lock-line hidden" id="per-account-locked">Διαφοροποίηση ανά λογαριασμό<span class="lock-reason">Κλειδωμένο από το πακέτο σας &middot; Locked by your package</span></p>
             <% } %>
+            <!-- Provider-specific metadata. Rendered only when that provider is
+                 actually a selected destination — never as standing clutter. -->
+            <div id="youtube-fields" class="provider-fields hidden" data-provider-fields="youtube">
+              <h4 class="provider-fields-title">YouTube</h4>
+              <div class="form-row">
+                <div>
+                  <label class="field-label" for="youtubeTitle">Τίτλος &middot; Title</label>
+                  <input id="youtubeTitle" type="text" maxlength="100" placeholder="Video title">
+                  <p class="section-note">Απαιτείται. Δεν αντιγράφεται από τη λεζάντα. &middot; Required; never copied from the caption.</p>
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label class="field-label" for="youtubeDescription">Περιγραφή &middot; Description</label>
+                  <textarea id="youtubeDescription" rows="2" maxlength="5000" placeholder="Optional description…"></textarea>
+                </div>
+              </div>
+              <p class="section-note">Ιδιωτικό (κλειδωμένο) &middot; Private (locked), subscriber notifications disabled.</p>
+            </div>
             <p id="sound-note" class="section-note hidden" style="color:var(--accent)">
               Ο «Ήχος TikTok» απαιτεί χειροκίνητη ολοκλήρωση στην εφαρμογή TikTok. &middot; “TikTok sound” needs manual completion in the TikTok app.
             </p>
@@ -254,9 +293,27 @@
       var perAccountLocked = document.getElementById('per-account-locked');
       var advanced = document.getElementById('advanced-schedule');
       var scheduleAt = document.getElementById('schedule-at');
+      var mediaUrlInput = document.getElementById('publicMediaUrl');
+      var autoMusicToggle = document.getElementById('auto-music');
+      var autoMusicStatus = document.getElementById('auto-music-status');
+      var youtubeFields = document.getElementById('youtube-fields');
+      var youtubeTitle = document.getElementById('youtubeTitle');
+      var youtubeDescription = document.getElementById('youtubeDescription');
       var selectedFiles = [];
       var currentMode = 'interval';
       var overrides = {};
+      // Auto Music derivatives staged for the exact files they were rendered
+      // from. Keyed by name:size so a changed file list can never carry a stale
+      // token forward.
+      var musicTokens = {};
+      var musicPending = false;
+
+      function fileKey(file) { return file.name + ':' + file.size; }
+      function mediaUrlValue() { return mediaUrlInput ? mediaUrlInput.value.trim() : ''; }
+      function usingUrlSource() { return selectedFiles.length === 0 && mediaUrlValue() !== ''; }
+      function youtubeSelected() {
+        return selectedDestinations().some(function (dest) { return dest.provider === 'youtube'; });
+      }
 
       function showNotice(message, kind) {
         var el = document.getElementById('notice');
@@ -302,7 +359,16 @@
           li.appendChild(remove);
           fileList.appendChild(li);
         });
+        // Drop derivatives whose source is no longer staged, so a removed file
+        // can never carry its prepared media into a later submission.
+        var live = {};
+        selectedFiles.forEach(function (file) {
+          var key = fileKey(file);
+          if (Object.prototype.hasOwnProperty.call(musicTokens, key)) live[key] = musicTokens[key];
+        });
+        musicTokens = live;
         update();
+        stageMusic();
       }
       function addFiles(files) {
         Array.prototype.slice.call(files).forEach(function (file) {
@@ -377,9 +443,65 @@
       // Default safely when exactly one valid account exists.
       if (boxes.length === 1) boxes[0].checked = true;
 
+      // ── Auto Music ──
+      // Uses the SAME preparation endpoint the classic intake used
+      // (POST /api/auto-caption with autoMusic=1): one signed token per file,
+      // redeemed at submit. Failure is never fatal — the original video is used
+      // and the composer says so rather than silently dropping the request.
+      if (mediaUrlInput) mediaUrlInput.addEventListener('input', update);
+      if (autoMusicToggle) {
+        autoMusicToggle.addEventListener('change', function () {
+          musicTokens = {};
+          if (autoMusicToggle.checked) stageMusic();
+          else { autoMusicStatus.textContent = ''; update(); }
+        });
+      }
+
+      function stageMusic() {
+        if (!autoMusicToggle || !autoMusicToggle.checked) return;
+        var pending = selectedFiles.filter(function (file) {
+          return !Object.prototype.hasOwnProperty.call(musicTokens, fileKey(file));
+        });
+        if (pending.length === 0) { update(); return; }
+        musicPending = true;
+        autoMusicStatus.innerHTML = '<span class="spin"></span> Προετοιμασία μουσικής…';
+        update();
+
+        Promise.all(pending.map(function (file) {
+          var body = new FormData();
+          body.append('video', file);
+          body.append('autoMusic', '1');
+          body.append('caption', captionEl.value);
+          body.append('hashtags', hashtagsEl.value);
+          return fetch('/api/auto-caption', { method: 'POST', body: body, headers: { 'Accept': 'application/json' } })
+            .then(function (response) { return response.json(); })
+            .then(function (payload) {
+              var token = payload && payload.music && payload.music.token;
+              musicTokens[fileKey(file)] = token || '';
+              return Boolean(token);
+            })
+            .catch(function () { musicTokens[fileKey(file)] = ''; return false; });
+        })).then(function (results) {
+          musicPending = false;
+          var ok = results.filter(Boolean).length;
+          autoMusicStatus.textContent = ok === results.length
+            ? ok + (ok === 1 ? ' βίντεο με μουσική' : ' βίντεο με μουσική')
+            : ok + '/' + results.length + ' με μουσική· τα υπόλοιπα κρατούν τον αρχικό ήχο.';
+          update();
+        });
+      }
+
+      function stagedTokens() {
+        if (!autoMusicToggle || !autoMusicToggle.checked) return [];
+        return selectedFiles
+          .map(function (file) { return musicTokens[fileKey(file)]; })
+          .filter(function (token) { return Boolean(token); });
+      }
+
       // ── 3 · Caption ──
       sharedSound.addEventListener('change', update);
       captionEl.addEventListener('input', update);
+      if (youtubeTitle) youtubeTitle.addEventListener('input', update);
       if (perAccountToggle) {
         perAccountToggle.addEventListener('change', function () {
           perAccountPanel.classList.toggle('hidden', !perAccountToggle.checked);
@@ -497,6 +619,16 @@
         var files = selectedFiles.length;
         var destinations = selectedDestinations();
         var when = scheduleSummary();
+        var urlSource = usingUrlSource();
+        var sourceCount = files > 0 ? files : (urlSource ? 1 : 0);
+        var wantsYouTube = youtubeSelected();
+
+        // Provider metadata appears only when that provider is a destination.
+        if (youtubeFields) youtubeFields.classList.toggle('hidden', !wantsYouTube);
+        // Auto Music mixes an uploaded video; a hosted URL is used as-is.
+        if (document.getElementById('auto-music-row')) {
+          document.getElementById('auto-music-row').classList.toggle('hidden', files === 0);
+        }
 
         if (selectedCountEl) {
           selectedCountEl.textContent = destinations.length === 0
@@ -510,7 +642,7 @@
         if (perAccountToggleRow) perAccountToggleRow.classList.toggle('hidden', destinations.length < 2);
         if (perAccountLocked) perAccountLocked.classList.toggle('hidden', destinations.length < 2);
         if (perAccountToggle && perAccountToggle.checked) renderOverrideRows();
-        if (advanced) advanced.classList.toggle('hidden', files < 2);
+        if (advanced) advanced.classList.toggle('hidden', sourceCount < 2);
 
         if (soundNote) {
           soundNote.classList.toggle('hidden', !destinations.some(function (dest) {
@@ -518,24 +650,41 @@
           }));
         }
 
-        var uploadOk = setStep('upload', files > 0, files > 0 ? files + ' αρχεία' : '');
+        // One YouTube title cannot describe several videos — the same rule the
+        // server enforces, surfaced before the user can hit it.
+        var youtubeTitleOk = !wantsYouTube || Boolean(youtubeTitle && youtubeTitle.value.trim());
+        var youtubeSourceOk = !wantsYouTube || sourceCount === 1;
+
+        var uploadOk = setStep('upload', sourceCount > 0,
+          urlSource ? 'URL' : (files > 0 ? files + ' αρχεία' : ''));
         var accountsOk = setStep('accounts', destinations.length > 0,
           destinations.length > 0 ? String(destinations.length) : '');
-        var captionOk = setStep('caption', true,
-          captionEl.value.trim() ? 'Καθορισμένη' : 'Αυτόματη');
+        var captionOk = setStep('caption', youtubeTitleOk,
+          wantsYouTube && !youtubeTitleOk
+            ? 'Λείπει τίτλος'
+            : (captionEl.value.trim() ? 'Καθορισμένη' : 'Αυτόματη'));
         var scheduleOk = setStep('schedule', Boolean(when), when);
-        var ready = uploadOk && accountsOk && captionOk && scheduleOk;
+        var ready = uploadOk && accountsOk && captionOk && scheduleOk
+          && youtubeSourceOk && !musicPending;
         setStep('review', ready, ready ? 'Έτοιμο' : '');
 
         reviewList.innerHTML = '';
         [
-          [uploadOk, files ? files + (files === 1 ? ' αρχείο' : ' αρχεία') : 'Προσθέστε αρχεία'],
+          [uploadOk, urlSource
+            ? 'Media URL'
+            : (files ? files + (files === 1 ? ' αρχείο' : ' αρχεία') : 'Προσθέστε αρχεία ή URL')],
           [accountsOk, destinations.length
             ? destinations.length + (destinations.length === 1 ? ' λογαριασμός' : ' λογαριασμοί')
             : 'Επιλέξτε λογαριασμό'],
-          [captionOk, captionEl.value.trim() ? 'Λεζάντα έτοιμη' : 'Λεζάντα: αυτόματη προετοιμασία'],
+          [captionOk, wantsYouTube && !youtubeTitleOk
+            ? 'Απαιτείται τίτλος YouTube'
+            : (captionEl.value.trim() ? 'Λεζάντα έτοιμη' : 'Λεζάντα: αυτόματη προετοιμασία')],
           [scheduleOk, when || 'Ορίστε χρόνο'],
-          [ready, ready ? 'Έτοιμο' : 'Δεν είναι έτοιμο']
+          [ready, ready
+            ? 'Έτοιμο'
+            : (!youtubeSourceOk
+                ? 'Το YouTube δέχεται ένα βίντεο τη φορά'
+                : (musicPending ? 'Προετοιμασία μουσικής…' : 'Δεν είναι έτοιμο'))]
         ].forEach(function (entry) {
           var li = document.createElement('li');
           li.className = entry[0] ? 'review-ok' : 'review-todo';
@@ -551,15 +700,22 @@
       form.addEventListener('submit', function (event) {
         event.preventDefault();
         var destinations = selectedDestinations();
-        if (selectedFiles.length === 0 || destinations.length === 0) return;
+        if ((selectedFiles.length === 0 && !usingUrlSource()) || destinations.length === 0) return;
         submitBtn.disabled = true;
         submitStatus.innerHTML = '<span class="spin"></span> Μεταφόρτωση…';
 
         var data = new FormData();
         selectedFiles.forEach(function (file) { data.append('videos', file); });
+        if (usingUrlSource()) data.append('publicMediaUrl', mediaUrlValue());
         data.append('destinations', JSON.stringify(destinations));
         data.append('caption', captionEl.value);
         data.append('hashtags', hashtagsEl.value);
+        var tokens = stagedTokens();
+        if (tokens.length > 0) data.append('autoMusicTokens', JSON.stringify(tokens));
+        if (youtubeSelected()) {
+          data.append('youtubeTitle', youtubeTitle.value);
+          data.append('youtubeDescription', youtubeDescription.value);
+        }
         data.append('timezoneName', (Intl.DateTimeFormat().resolvedOptions().timeZone || ''));
         data.append('timezoneOffsetMinutes', String(new Date().getTimezoneOffset()));
         data.append('intakeKey', (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));

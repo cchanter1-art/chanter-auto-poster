@@ -214,14 +214,26 @@ function createBatchService(dependencies = {}) {
 
   async function createBatch(context, input = {}) {
     const files = Array.isArray(input.files) ? input.files.filter(Boolean) : [];
-    if (files.length === 0) {
-      throw new BatchServiceError('Upload at least one video or image to create a batch.');
+    // Media source: uploaded files, OR one already-hosted public URL. These are
+    // alternatives, never a second pipeline — applicationService.validateMedia
+    // is the one authority on both, and it keeps URL intake video-only. A URL
+    // contributes exactly one source item.
+    const mediaUrl = String(input.mediaUrl || input.publicMediaUrl || '').trim();
+    if (files.length === 0 && !mediaUrl) {
+      throw new BatchServiceError('Upload at least one video or image, or provide a public media URL.');
+    }
+    if (files.length > 0 && mediaUrl) {
+      throw new BatchServiceError(
+        'Choose one media source: uploaded files or a public media URL, not both.',
+        { code: 'ambiguous_media_source' }
+      );
     }
     if (files.length > settings.maxItems) {
       throw new BatchServiceError(`A batch can contain at most ${settings.maxItems} items.`, {
         code: 'batch_too_large'
       });
     }
+    const sourceCount = files.length > 0 ? files.length : 1;
 
     const destinations = normalizeDestinations(input.destinations);
     if (destinations.length === 0) {
@@ -232,17 +244,32 @@ function createBatchService(dependencies = {}) {
         code: 'too_many_destinations'
       });
     }
-    // Stated boundary, unchanged from V1: YouTube requires a human-entered
-    // per-video title (never AI-generated), which cannot exist yet at bulk
-    // intake time. YouTube stays reachable per item during review, through
-    // the existing changeItemDestination override. Fan-out at intake is
-    // scoped to providers that need no upfront per-item metadata.
-    const unbatchable = destinations.filter((dest) => dest.provider === providers.PROVIDER_YOUTUBE);
-    if (unbatchable.length > 0) {
-      throw new BatchServiceError(
-        'YouTube requires a human-entered title per video and cannot be selected at batch intake. Add it as a destination for individual items during review.',
-        { status: 409, code: 'provider_not_batchable' }
-      );
+    // YouTube's boundary is unchanged in substance: it requires a
+    // human-entered title, never one derived from a caption. What changed is
+    // only WHEN that title can exist. The canonical composer collects it at
+    // intake, so YouTube is admissible here exactly when a title was actually
+    // typed — and refused with the same message when it was not. Per-item
+    // assignment during review (changeItemDestination) is untouched.
+    //
+    // One title covers the whole submission, so it stays unambiguous only
+    // while there is one source item. A multi-source submission would silently
+    // give every video the same title, which is the kind of quiet wrong this
+    // guard exists to prevent.
+    const youtubeTitle = String((input.youtube && input.youtube.title) || '').trim();
+    const youtubeDestinations = destinations.filter((dest) => dest.provider === providers.PROVIDER_YOUTUBE);
+    if (youtubeDestinations.length > 0) {
+      if (!youtubeTitle) {
+        throw new BatchServiceError(
+          'YouTube requires a human-entered title per video. Add the title here, or assign YouTube to individual items during review.',
+          { status: 409, code: 'provider_not_batchable' }
+        );
+      }
+      if (sourceCount > 1) {
+        throw new BatchServiceError(
+          'One YouTube title cannot describe several videos. Compose YouTube uploads one video at a time, or assign YouTube to individual items during review.',
+          { status: 409, code: 'provider_title_ambiguous' }
+        );
+      }
     }
 
     // Fail closed before any upload/creation work: every requested
@@ -268,7 +295,7 @@ function createBatchService(dependencies = {}) {
     }
     const plan = computeBatchSchedulePlan({
       mode: scheduleMode,
-      sourceCount: files.length,
+      sourceCount,
       timezoneName: input.timezoneName,
       timezoneOffsetMinutes: input.timezoneOffsetMinutes,
       startDate: input.startDate,
@@ -306,7 +333,7 @@ function createBatchService(dependencies = {}) {
     });
     const capabilityCheck = composerPolicy.checkComposerSubmission(capability, {
       destinationCount: destinations.length,
-      itemCount: files.length
+      itemCount: sourceCount
     });
     if (!capabilityCheck.allowed) {
       throw new BatchServiceError(capabilityCheck.reason, {
@@ -351,7 +378,7 @@ function createBatchService(dependencies = {}) {
       accountLabel: singleDestination ? singleDestination.accountId : `${destinations.length} destination accounts`,
       status: 'preparing',
       itemCount: 0,
-      videoCount: files.length,
+      videoCount: sourceCount,
       destinationCount: destinations.length,
       scheduleMode,
       staggerMinutes: staggerMinutes || 0,
@@ -375,8 +402,22 @@ function createBatchService(dependencies = {}) {
           // the flag threads through media validation and the storage write.
           allowImageMedia: true,
           files,
+          // Already-hosted media, validated by the same validateMedia contract
+          // as an upload (HTTPS + video-only for URLs). Empty for file intake.
+          mediaUrl,
           caption: String(input.caption || ''),
           hashtags: String(input.hashtags || ''),
+          // Auto Music derivatives staged before intake, matched to their own
+          // source file inside storage. Never fabricated here.
+          preparedMedia: input.preparedMedia,
+          // Provider metadata travels only to the provider that defines it;
+          // schedulePost validates it and rejects a missing YouTube title.
+          youtube: provider === providers.PROVIDER_YOUTUBE
+            ? {
+                title: youtubeTitle,
+                description: String((input.youtube && input.youtube.description) || '')
+              }
+            : undefined,
           batchId,
           schedule: { mode: 'batch_sync', plan }
         });
