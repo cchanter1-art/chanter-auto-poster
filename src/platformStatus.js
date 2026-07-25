@@ -99,6 +99,70 @@ function projectAutoPosterBatch(record = {}) {
   };
 }
 
+// Projects one recurring daily series into a Platform work item. A series has
+// no record of its own: it IS the group of queue jobs that share a seriesId,
+// so every number here is counted from durable posts rather than from a
+// summary that could drift away from them.
+//
+// The state vocabulary is the same canonical one every other producer uses —
+// no series-specific status is invented.
+function projectRecurringSeries(series = {}) {
+  const seriesId = String(series.seriesId || '');
+  const total = Number(series.jobCount || 0);
+  const failed = Number(series.failedCount || 0);
+  const posted = Number(series.postedCount || 0);
+  const awaiting = Number(series.pendingApprovalCount || 0);
+  const occurrences = Number(series.occurrenceCount || 0);
+
+  let state;
+  let reason;
+  if (total === 0) {
+    state = WORK_STATE.IDLE;
+    reason = 'No releases.';
+  } else if (failed > 0) {
+    state = WORK_STATE.FAILED;
+    reason = `${failed} of ${total} releases failed.`;
+  } else if (awaiting > 0) {
+    state = WORK_STATE.WAITING_APPROVAL;
+    reason = `${awaiting} of ${total} releases waiting for human approval.`;
+  } else if (posted === total) {
+    state = WORK_STATE.COMPLETED;
+    reason = 'Every release published.';
+  } else {
+    state = WORK_STATE.RUNNING;
+    reason = `Approved; ${total - posted} of ${total} releases still scheduled.`;
+  }
+
+  return {
+    moduleId: 'publishing-queue',
+    workId: seriesId,
+    title: `Daily series ${seriesId.slice(0, 8) || '—'}`,
+    state,
+    stateReason: reason,
+    counts: { total, prepared: total, failed, accepted: total - awaiting, awaiting },
+    needsApproval: state === WORK_STATE.WAITING_APPROVAL && awaiting > 0,
+    // Occurrences are ordinary queue jobs, reviewed and approved in the Release
+    // Queue — the surface the publishing-queue module already owns.
+    href: '/private/autoposter',
+    createdAt: String(series.createdAt || ''),
+    updatedAt: String(series.updatedAt || series.createdAt || ''),
+    evidenceAvailable: true,
+    // Recurrence parameters travel with the work item so Evidence retains what
+    // the series was actually asked to do.
+    recurrence: {
+      frequency: String(series.frequency || 'daily'),
+      startDate: String(series.startDate || ''),
+      endDate: String(series.endDate || ''),
+      timezone: String(series.timezone || ''),
+      occurrenceCount: occurrences,
+      firstReleaseAt: String(series.firstReleaseAt || ''),
+      lastReleaseAt: String(series.lastReleaseAt || '')
+    },
+    videoCount: Number(series.sourceCount || 0),
+    destinationCount: Number(series.destinationCount || 0)
+  };
+}
+
 // Operator's durable mission-graph vocabulary (chanter.mission.graph.v1,
 // MissionGraphState in the Operator repository) is:
 //   approval_required | approved | running | completed
@@ -193,6 +257,7 @@ module.exports = {
   WORK_STATE_PRESENTATION,
   presentation,
   projectAutoPosterBatch,
+  projectRecurringSeries,
   projectOperatorMissionGraph,
   summarizeWork,
   sortWork

@@ -475,11 +475,16 @@ function okFetch(graphs) {
 
 test('the shell renders mixed-module work with no module-specific branching', async (t) => {
   const originalListBatches = batchService.listBatches;
+  const originalListSeries = batchService.listSeries;
   batchService.listBatches = async () => ({ batches: AUTOPOSTER_BATCHES });
+  // Recurring series are a second registered producer. This file fakes the
+  // durable reads, so it fakes this one too rather than reaching storage.
+  batchService.listSeries = async () => ({ series: [] });
   const loaded = loadRouterWithOperator(okFetch(OPERATOR_GRAPHS));
   const server = await startServer(loaded.router);
   t.after(() => {
     batchService.listBatches = originalListBatches;
+    batchService.listSeries = originalListSeries;
     server.close();
     loaded.restore();
   });
@@ -528,7 +533,9 @@ test('the shell renders mixed-module work with no module-specific branching', as
   // 6. The API reports both providers and mixed-module counts.
   const api = await (await fetch(`${baseUrl}/api/platform/work`)).json();
   assert.equal(api.ok, true);
-  assert.deepEqual(api.providers, ['autoposter', 'operator']);
+  // Three producers now: AutoPoster batches, recurring series (owned by the
+  // publishing-queue module), and Operator.
+  assert.deepEqual(api.providers, ['autoposter', 'publishing-queue', 'operator']);
   assert.deepEqual(api.degraded, []);
   assert.equal(api.summary.total, 4);
   assert.equal(api.summary.awaitingApproval, 2);
@@ -536,18 +543,23 @@ test('the shell renders mixed-module work with no module-specific branching', as
   // 7. Overview and System health count the same mixed total.
   const health = await (await fetch(`${baseUrl}/platform/health`)).text();
   assert.ok(health.includes('data-health="providers"'));
-  assert.ok(health.includes('2 of 2 registered modules answered.'));
+  assert.ok(health.includes('3 of 3 registered modules answered.'));
 });
 
 test('a dead Operator degrades only itself while AutoPoster work still renders', async (t) => {
   const originalListBatches = batchService.listBatches;
+  const originalListSeries = batchService.listSeries;
   batchService.listBatches = async () => ({ batches: AUTOPOSTER_BATCHES });
+  // Recurring series are a second registered producer. This file fakes the
+  // durable reads, so it fakes this one too rather than reaching storage.
+  batchService.listSeries = async () => ({ series: [] });
   const loaded = loadRouterWithOperator(async () => {
     throw new Error('connect ECONNREFUSED 127.0.0.1:3001');
   });
   const server = await startServer(loaded.router);
   t.after(() => {
     batchService.listBatches = originalListBatches;
+    batchService.listSeries = originalListSeries;
     server.close();
     loaded.restore();
   });
@@ -570,7 +582,7 @@ test('a dead Operator degrades only itself while AutoPoster work still renders',
 
   const health = await (await fetch(`${baseUrl}/platform/health`)).text();
   assert.ok(health.includes('data-testid="health-work-degraded"'));
-  assert.ok(health.includes('1 of 2 registered modules answered.'));
+  assert.ok(health.includes('2 of 3 registered modules answered.'));
 
   const api = await (await fetch(`${baseUrl}/api/platform/work`)).json();
   assert.equal(api.ok, true, 'a partial read is still a successful read');
@@ -583,7 +595,11 @@ test('a dead Operator degrades only itself while AutoPoster work still renders',
 
 test('evidence lists only work that carries a durable record', async (t) => {
   const originalListBatches = batchService.listBatches;
+  const originalListSeries = batchService.listSeries;
   batchService.listBatches = async () => ({ batches: AUTOPOSTER_BATCHES });
+  // Recurring series are a second registered producer. This file fakes the
+  // durable reads, so it fakes this one too rather than reaching storage.
+  batchService.listSeries = async () => ({ series: [] });
   // A graph with no compiled nodes has nothing to evidence yet.
   const loaded = loadRouterWithOperator(okFetch([
     ...OPERATOR_GRAPHS,
@@ -600,6 +616,7 @@ test('evidence lists only work that carries a durable record', async (t) => {
   const server = await startServer(loaded.router);
   t.after(() => {
     batchService.listBatches = originalListBatches;
+    batchService.listSeries = originalListSeries;
     server.close();
     loaded.restore();
   });
@@ -624,17 +641,29 @@ test('evidence lists only work that carries a durable record', async (t) => {
 
 test('with no Operator configured the platform registers AutoPoster alone', async (t) => {
   const originalListBatches = batchService.listBatches;
+  const originalListSeries = batchService.listSeries;
   batchService.listBatches = async () => ({ batches: AUTOPOSTER_BATCHES });
+  // Recurring series are a second registered producer. This file fakes the
+  // durable reads, so it fakes this one too rather than reaching storage.
+  batchService.listSeries = async () => ({ series: [] });
   const platformRoutes = require('../src/platformRoutes');
   const server = await startServer(platformRoutes);
   t.after(() => {
     batchService.listBatches = originalListBatches;
+    batchService.listSeries = originalListSeries;
     server.close();
   });
 
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const api = await (await fetch(`${baseUrl}/api/platform/work`)).json();
-  assert.deepEqual(api.providers, ['autoposter'], 'an unconfigured integration registers nothing');
+  // AutoPoster batches and recurring series are two producers of the same
+  // module registry; Operator stays absent because it is unconfigured, which
+  // is the point of this assertion.
+  assert.deepEqual(
+    api.providers,
+    ['autoposter', 'publishing-queue'],
+    'an unconfigured integration registers nothing'
+  );
   assert.deepEqual(api.degraded, [], 'unconfigured is not an outage');
   assert.equal(api.ok, true);
   assert.equal(api.summary.total, 2);

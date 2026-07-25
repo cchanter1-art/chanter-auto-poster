@@ -444,31 +444,58 @@ function makeWorld({ planId = 'legacy_full_access', entitlements = null } = {}) 
               && String(candidate.originalName || '') === String(file.originalname || '')
               && Number(candidate.originalSize || 0) === Number(file.size || 0)) || null)
             : null;
-          const post = postFromDoc({
-            id: `post-${++sequence}`,
-            data: () => ({
-              userId, workspaceId: defaults.workspaceId,
-              platform: defaults.provider, provider: defaults.provider,
-              accountId: target.accountId, tiktokOpenId: target.tiktokOpenId, username: target.username,
-              originalName: file ? file.originalname : '', fileName: file ? file.originalname : '',
-              mediaType: 'video',
-              mediaUrl: `https://cdn.example.com/${target.accountId}/${file ? file.originalname : 'url'}`,
-              caption: defaults.caption, hashtags: defaults.hashtags, soundMode: target.soundMode,
-              autoMusicApplied: Boolean(prepared),
-              musicTrackId: prepared ? String(prepared.trackId || '') : '',
-              providerMetadata: defaults.providerMetadata || null,
-              scheduledAt: null, status: 'pending', approvedAt: null, approvedBy: null,
-              createdAt: { toDate: () => new Date(now) }, updatedAt: { toDate: () => new Date(now) },
-              batchId: defaults.batchId || '',
-              batchOrder: defaults.batchId ? created.length : null,
-              sourceIndex: defaults.batchId ? sourceIdx : null,
-              preparation: defaults.batchId
-                ? { status: 'pending', attempts: 0, leaseAt: null, finishedAt: null, provider: '', fallbackUsed: false, error: '' }
-                : null
-            })
-          });
-          posts.push(post);
-          created.push(post);
+          // Mirrors the real storage contract for a recurring series: the
+          // caller supplies one schedule entry per (account × occurrence), and
+          // storage creates one post per entry for every source. Absent, this
+          // is the ordinary single-job path.
+          const entries = Array.isArray(defaults.scheduleEntries) && defaults.scheduleEntries.length > 0
+            ? defaults.scheduleEntries.filter((entry) => entry.accountId === target.accountId)
+            : [null];
+          const seriesId = defaults.campaignId || `campaign-${sequence}`;
+          for (const entry of entries) {
+            const post = postFromDoc({
+              id: `post-${++sequence}`,
+              data: () => ({
+                userId, workspaceId: defaults.workspaceId,
+                platform: defaults.provider, provider: defaults.provider,
+                accountId: target.accountId, tiktokOpenId: target.tiktokOpenId, username: target.username,
+                originalName: file ? file.originalname : '', fileName: file ? file.originalname : '',
+                mediaType: 'video',
+                mediaUrl: `https://cdn.example.com/${target.accountId}/${file ? file.originalname : 'url'}`,
+                caption: defaults.caption, hashtags: defaults.hashtags, soundMode: target.soundMode,
+                autoMusicApplied: Boolean(prepared),
+                musicTrackId: prepared ? String(prepared.trackId || '') : '',
+                providerMetadata: defaults.providerMetadata || null,
+                scheduledAt: null,
+                status: entry ? 'scheduled' : 'pending',
+                approvedAt: defaults.selfApprove ? { toDate: () => new Date(now) } : null,
+                approvedBy: defaults.selfApprove ? defaults.selfApprove.approvedBy : null,
+                createdAt: { toDate: () => new Date(now) }, updatedAt: { toDate: () => new Date(now) },
+                batchId: defaults.batchId || '',
+                batchOrder: defaults.batchId ? created.length : null,
+                sourceIndex: defaults.batchId ? sourceIdx : null,
+                // Durable series linkage, exactly as storage stamps it.
+                seriesId: entry ? seriesId : '',
+                seriesFrequency: entry && defaults.scheduleSeries ? defaults.scheduleSeries.frequency : '',
+                seriesStartDate: entry && defaults.scheduleSeries ? defaults.scheduleSeries.startDate : '',
+                seriesEndDate: entry && defaults.scheduleSeries ? defaults.scheduleSeries.endDate : '',
+                seriesOccurrenceIndex: entry ? entry.occurrenceIndex : null,
+                seriesOccurrenceCount: entry && defaults.scheduleSeries ? defaults.scheduleSeries.occurrenceCount : 0,
+                seriesSourceCount: entry && defaults.scheduleSeries ? defaults.scheduleSeries.sourceCount : 0,
+                seriesTimezone: entry && defaults.scheduleSeries ? defaults.scheduleSeries.timezone : '',
+                seriesOccurrenceDate: entry ? entry.occurrenceDate : '',
+                preparation: defaults.batchId
+                  ? { status: 'pending', attempts: 0, leaseAt: null, finishedAt: null, provider: '', fallbackUsed: false, error: '' }
+                  : null
+              })
+            });
+            // postFromDoc expects a Firestore timestamp, so the resolved
+            // occurrence time is stamped on the mapped post — the same way
+            // applyBatchSourceSchedule does it below.
+            if (entry) post.scheduledAt = entry.scheduledAt;
+            posts.push(post);
+            created.push(post);
+          }
         }
       }
       return created;
@@ -863,6 +890,231 @@ test('a stale or mismatched derivative never substitutes the wrong media', async
   assert.equal(result.items.length, 1);
   assert.notEqual(result.items[0].autoMusicApplied, true, 'the original upload is used, never another file');
   assert.equal(result.items[0].originalName, 'real.mp4');
+});
+
+// ── Recurring daily series through the canonical contract (P2) ───────────
+
+const SERIES = {
+  scheduleMode: 'recurringDaily',
+  startDate: '2026-07-11',
+  startTime: '09:00',
+  endDate: '2026-07-15',
+  timezoneOffsetMinutes: 0,
+  caption: 'daily series caption'
+};
+
+test('a recurring series expands through the existing engine, one source across many dates', async () => {
+  const world = makeWorld();
+  const result = await world.batchService.createBatch(websiteContext(), {
+    ...SERIES, intakeKey: 'series-single',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('one.mp4')]
+  });
+
+  // 2026-07-11 .. 2026-07-15 inclusive = 5 days.
+  assert.equal(result.series.occurrenceCount, 5);
+  assert.equal(result.series.createdCount, 5, 'one job per day for one account');
+  assert.equal(result.items.length, 5);
+  assert.equal(result.replayed, false);
+
+  // Every occurrence is the SAME source with the SAME caption — that is what
+  // makes it a series rather than five unrelated posts.
+  assert.equal(new Set(result.items.map((item) => item.originalName)).size, 1);
+  assert.ok(result.items.every((item) => item.caption === 'daily series caption'));
+
+  // Consecutive days at the same wall-clock time, and a stable series identity.
+  const times = result.items
+    .map((item) => Date.parse(item.scheduledAt))
+    .sort((left, right) => left - right);
+  assert.equal(new Date(times[0]).toISOString(), '2026-07-11T09:00:00.000Z');
+  assert.equal(new Date(times[4]).toISOString(), '2026-07-15T09:00:00.000Z');
+  for (let index = 1; index < times.length; index += 1) {
+    assert.equal(times[index] - times[index - 1], 86400000, 'exactly one day apart');
+  }
+  assert.equal(new Set(result.items.map((item) => item.seriesId)).size, 1, 'one series id');
+  assert.equal(result.items[0].seriesId, result.series.seriesId);
+  assert.deepEqual(
+    result.items.map((item) => item.seriesOccurrenceIndex).sort((a, b) => a - b),
+    [0, 1, 2, 3, 4],
+    'every occurrence is indexed inside its series'
+  );
+
+  // Nothing published, nothing pre-approved.
+  assert.ok(result.items.every((item) => item.approved !== true));
+  assert.equal(result.series.pendingApprovalCount, 5);
+  assert.equal(result.series.approvedAtCreation, false);
+});
+
+test('a multi-account series fans out through the same path', async () => {
+  const world = makeWorld();
+  const result = await world.batchService.createBatch(websiteContext(), {
+    ...SERIES, intakeKey: 'series-multi',
+    destinations: [
+      { provider: 'tiktok', accountId: 'account-a' },
+      { provider: 'tiktok', accountId: 'account-b' }
+    ],
+    files: [uploadFile('one.mp4')]
+  });
+
+  assert.equal(result.series.occurrenceCount, 5);
+  assert.equal(result.series.createdCount, 10, '5 days × 2 accounts');
+  assert.equal(result.series.destinationCount, 2);
+  assert.deepEqual(
+    new Set(result.items.map((item) => item.accountId)),
+    new Set(['account-a', 'account-b'])
+  );
+  // Both accounts share one series identity.
+  assert.equal(new Set(result.items.map((item) => item.seriesId)).size, 1);
+});
+
+test('series-level approval approves every generated draft at creation, and nothing more', async () => {
+  const world = makeWorld();
+  const approver = { ...websiteContext(), approval: { approvedBy: 'admin:owner' } };
+  const result = await world.batchService.createBatch(approver, {
+    ...SERIES, intakeKey: 'series-approved',
+    approveSeries: true,
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('one.mp4')]
+  });
+
+  assert.equal(result.series.approvedAtCreation, true);
+  assert.equal(result.series.pendingApprovalCount, 0);
+  assert.ok(result.items.every((item) => item.approved === true));
+  // Approval is not publication: every occurrence is still merely scheduled.
+  assert.ok(world.posts.every((post) => post.status === 'scheduled'));
+
+  // Without the explicit choice, the same request leaves every draft gated.
+  const gated = await world.batchService.createBatch(approver, {
+    ...SERIES, intakeKey: 'series-gated',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('one.mp4')]
+  });
+  assert.equal(gated.series.pendingApprovalCount, 5);
+  assert.ok(gated.items.every((item) => item.approved !== true));
+});
+
+test('a replayed series returns the original instead of expanding a second copy', async () => {
+  const world = makeWorld();
+  const input = {
+    ...SERIES, intakeKey: 'series-replay',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('one.mp4')]
+  };
+  const first = await world.batchService.createBatch(websiteContext(), input);
+  const replay = await world.batchService.createBatch(websiteContext(), input);
+
+  assert.equal(first.replayed, false);
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.series.seriesId, first.series.seriesId, 'the series id is deterministic');
+  assert.equal(replay.series.createdCount, 5);
+  assert.equal(world.posts.length, 5, 'no duplicate occurrences under retry');
+});
+
+test('a series refuses every input it cannot honour, and creates nothing when it does', async () => {
+  const cases = [
+    [{ caption: '' }, 'series_caption_required'],
+    [{ endDate: '' }, 'series_end_required'],
+    [{ startDate: '', startTime: '' }, 'series_start_required'],
+    // End before start, and a run longer than the engine's own bound.
+    [{ endDate: '2026-07-09' }, 'validation_failed'],
+    [{ endDate: '2030-07-15' }, 'validation_failed']
+  ];
+
+  for (const [override, expectedCode] of cases) {
+    const world = makeWorld();
+    await assert.rejects(
+      world.batchService.createBatch(websiteContext(), {
+        ...SERIES, ...override, intakeKey: `series-bad-${expectedCode}-${JSON.stringify(override)}`,
+        destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+        files: [uploadFile('one.mp4')]
+      }),
+      (error) => {
+        assert.equal(error.code, expectedCode, `expected ${expectedCode} for ${JSON.stringify(override)}`);
+        return true;
+      }
+    );
+    assert.equal(world.posts.length, 0, `no durable state for ${JSON.stringify(override)}`);
+  }
+});
+
+test('a failed series can be corrected and retried with the same intake key', async () => {
+  const world = makeWorld();
+  await assert.rejects(
+    world.batchService.createBatch(websiteContext(), {
+      ...SERIES, caption: '', intakeKey: 'series-fix',
+      destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+      files: [uploadFile('one.mp4')]
+    }),
+    /needs one caption/
+  );
+  assert.equal(world.posts.length, 0);
+
+  const fixed = await world.batchService.createBatch(websiteContext(), {
+    ...SERIES, intakeKey: 'series-fix',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('one.mp4')]
+  });
+  assert.equal(fixed.replayed, false);
+  assert.equal(fixed.series.createdCount, 5);
+});
+
+test('a series is observable as work with honest counts and its recurrence parameters', async () => {
+  const world = makeWorld();
+  await world.batchService.createBatch(websiteContext(), {
+    ...SERIES, intakeKey: 'series-visible',
+    destinations: [{ provider: 'tiktok', accountId: 'account-a' }],
+    files: [uploadFile('one.mp4')]
+  });
+
+  const listed = await world.batchService.listSeries(websiteContext());
+  assert.equal(listed.series.length, 1);
+  const series = listed.series[0];
+  assert.equal(series.occurrenceCount, 5);
+  assert.equal(series.jobCount, 5);
+  assert.equal(series.pendingApprovalCount, 5);
+  assert.equal(series.startDate, '2026-07-11');
+  assert.equal(series.endDate, '2026-07-15');
+
+  // …and it projects onto the one canonical work vocabulary, owned by the
+  // module whose surface actually reviews the occurrences.
+  const platformStatus = require('../src/platformStatus');
+  const item = platformStatus.projectRecurringSeries(series);
+  assert.equal(item.moduleId, 'publishing-queue');
+  assert.equal(item.state, platformStatus.WORK_STATE.WAITING_APPROVAL);
+  assert.equal(item.needsApproval, true);
+  assert.equal(item.counts.awaiting, 5);
+  assert.equal(item.href, '/private/autoposter', 'occurrences are reviewed in the Release Queue');
+  // Evidence retains what the series was asked to do.
+  assert.equal(item.recurrence.frequency, 'daily');
+  assert.equal(item.recurrence.occurrenceCount, 5);
+  assert.equal(item.recurrence.startDate, '2026-07-11');
+  assert.equal(item.recurrence.endDate, '2026-07-15');
+});
+
+test('no second recurrence engine exists', () => {
+  // The batch slot planner must stay ignorant of recurrence, and the composer
+  // path must reach the engine that already implements it.
+  const batchSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'batchService.js'), 'utf8');
+  assert.match(batchSource, /mode: 'recurring_daily'/, 'the series delegates to the existing execution mode');
+  // Comments may NAME the engine; the intake projection must never call it or
+  // do the expansion itself.
+  const batchCode = batchSource.replace(/\/\/[^\n]*/g, '');
+  assert.doesNotMatch(batchCode, /computeDailySchedulePlan\s*\(/, 'batchService must not expand occurrences itself');
+  assert.doesNotMatch(batchCode, /86400000/, 'no day arithmetic belongs in the intake projection');
+  assert.doesNotMatch(batchCode, /require\([^)]*maxScheduler[^)]*\)[^;]*computeDaily/, 'no direct recurrence import');
+
+  // The batch planner is the LAST function in the file, so the body is bounded
+  // by the exports block rather than by a following declaration — otherwise the
+  // module's own MAX_RECURRING_JOBS export lands inside the slice and the
+  // assertion tests the wrong text.
+  const plannerSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'maxScheduler.js'), 'utf8');
+  const plannerStart = plannerSource.indexOf('function computeBatchSchedulePlan');
+  const exportsStart = plannerSource.indexOf('module.exports');
+  assert.ok(plannerStart >= 0 && exportsStart > plannerStart, 'planner body is locatable');
+  const batchPlanner = plannerSource.slice(plannerStart, exportsStart);
+  assert.doesNotMatch(batchPlanner, /recurring/i, 'recurrence was not grafted into the source-slot planner');
+  // …and the recurring planner is a separate function that still exists.
+  assert.match(plannerSource, /function computeDailySchedulePlan/, 'the recurring engine is untouched');
 });
 
 // ── Repeated-use readiness (P1 §13) ──────────────────────────────────────

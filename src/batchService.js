@@ -33,6 +33,11 @@ const composerPolicy = require('./composerPolicy');
 // (src/composerPolicy.js); nothing may raise it above this ceiling.
 const MAX_DESTINATIONS = composerPolicy.MAX_DESTINATIONS;
 
+// The composer's name for the recurring shape. It maps to the execution
+// vocabulary the engine already uses ('recurring_daily'); no second status or
+// payload vocabulary is introduced.
+const RECURRING_DAILY_MODE = 'recurringDaily';
+
 class BatchServiceError extends Error {
   constructor(message, { status = 400, code = 'validation_failed', details = {} } = {}) {
     super(message);
@@ -210,6 +215,194 @@ function createBatchService(dependencies = {}) {
     return { status, counts };
   }
 
+  // ── Intake: recurring series ─────────────────────────────────────────────
+
+  // One source set repeated across a bounded run of days. This function is an
+  // INTAKE PROJECTION only: every rule that decides what a series is — the
+  // occurrence expansion, the per-occurrence schedule, the series metadata,
+  // the entitlement quantity, the approval gate, the durable write — belongs to
+  // applicationService.schedulePost and the maxScheduler daily planner, exactly
+  // as the retired classic form used them. Nothing about recurrence is decided
+  // here.
+  //
+  // Deliberately NOT a batch: a batch stamps every item for per-item AI
+  // preparation, which for a series would mean one AI caption per occurrence of
+  // the same video — N different captions for one series. A series therefore
+  // carries one caption supplied at intake, which is what the classic form
+  // effectively did (Auto Caption ran before submit and posted its text).
+  async function createRecurringSeries(context, input, resolved) {
+    const { files, mediaUrl, destinations, sourceCount, youtubeTitle } = resolved;
+
+    const caption = String(input.caption || '').trim();
+    if (!caption) {
+      throw new BatchServiceError(
+        'A recurring series needs one caption. Every occurrence reuses it, so it cannot be generated per day.',
+        { code: 'series_caption_required' }
+      );
+    }
+
+    const startDate = String(input.startDate || '').trim();
+    const startTime = String(input.startTime || '').trim();
+    const endDate = String(input.endDate || '').trim();
+    if (!startDate || !startTime) {
+      throw new BatchServiceError('Set the first release date and time for the series.', {
+        code: 'series_start_required'
+      });
+    }
+    if (!endDate) {
+      throw new BatchServiceError('Set the last day of the series.', { code: 'series_end_required' });
+    }
+
+    const commercialContext = await resolveScope(context);
+
+    // Package capabilities first, on the same seam the batch path uses, so a
+    // locked capability is refused before any expansion or durable write.
+    const capability = composerPolicy.resolveComposerCapabilities(commercialContext, {
+      maxItems: settings.maxItems
+    });
+    const capabilityCheck = composerPolicy.checkComposerSubmission(capability, {
+      destinationCount: destinations.length,
+      itemCount: sourceCount
+    });
+    if (!capabilityCheck.allowed) {
+      throw new BatchServiceError(capabilityCheck.reason, {
+        status: 403,
+        code: capabilityCheck.code,
+        details: {
+          limit: capabilityCheck.limit,
+          current: capabilityCheck.current,
+          planId: capability.planId
+        }
+      });
+    }
+
+    // A series may only fan out to providers whose per-item metadata stays
+    // valid for every occurrence. YouTube needs a human-entered title per
+    // video; one title repeated across a whole series would be the same quiet
+    // wrong the intake guard already refuses, so it is refused here too.
+    const youtubeDestinations = destinations.filter((dest) => dest.provider === providers.PROVIDER_YOUTUBE);
+    if (youtubeDestinations.length > 0) {
+      throw new BatchServiceError(
+        'YouTube cannot be a recurring destination: every upload needs its own human-entered title. Schedule YouTube uploads one at a time.',
+        { status: 409, code: 'provider_not_recurring' }
+      );
+    }
+
+    const byProvider = new Map();
+    for (const dest of destinations) {
+      if (!byProvider.has(dest.provider)) byProvider.set(dest.provider, []);
+      byProvider.get(dest.provider).push(dest);
+    }
+
+    // One stable identity for the whole series, derived from the intake key.
+    // A per-post idempotencyKey cannot guard a series — schedulePost constrains
+    // it to exactly one channel — so replay is guarded at the series level:
+    // the same intake key yields the same seriesId, and an existing series with
+    // that id is RETURNED rather than expanded a second time.
+    const intakeKey = String(input.intakeKey || '').trim() || randomUUID();
+    const workspaceId = commercialContext.workspace.workspaceId;
+    const seriesId = deriveBatchId(context.userId, workspaceId, `series:${intakeKey}`);
+
+    const existingPosts = await storage.getPosts(context.userId, undefined, commercialContext.workspaceScope);
+    const alreadyCreated = existingPosts.filter((post) => String(post.seriesId || '') === seriesId);
+    if (alreadyCreated.length > 0) {
+      return seriesResult({
+        replayed: true,
+        seriesId,
+        intakeKey,
+        posts: alreadyCreated,
+        destinations,
+        sourceCount,
+        approveSeries: input.approveSeries === true
+      });
+    }
+
+    const createdPosts = [];
+    let plan = null;
+    for (const [provider, providerDestinations] of byProvider) {
+      const result = await applicationService.schedulePost(
+        {
+          ...context,
+          // Series-level approval is the caller's explicit choice, carried on
+          // the execution context exactly as the classic path carried it.
+          approval: input.approveSeries === true ? context.approval : null
+        },
+        {
+          provider,
+          accountIds: providerDestinations.map((dest) => dest.accountId),
+          soundModes: Object.fromEntries(
+            providerDestinations.map((dest) => [dest.accountId, dest.soundMode])
+          ),
+          allowImageMedia: true,
+          files,
+          mediaUrl,
+          caption,
+          hashtags: String(input.hashtags || ''),
+          preparedMedia: input.preparedMedia,
+          campaignId: seriesId,
+          schedule: {
+            mode: 'recurring_daily',
+            startDate,
+            endDate,
+            startTime,
+            timezoneName: input.timezoneName,
+            timezoneOffsetMinutes: input.timezoneOffsetMinutes
+          }
+        }
+      );
+      createdPosts.push(...result.posts);
+      // The planner is the authority on the shape; report what it decided
+      // rather than recomputing an independent count here.
+      plan = result.schedule.plan;
+    }
+
+    return seriesResult({
+      replayed: false,
+      seriesId,
+      intakeKey,
+      posts: createdPosts,
+      destinations,
+      sourceCount,
+      approveSeries: input.approveSeries === true,
+      plan
+    });
+  }
+
+  // One shape for a created series and for a replayed one, built from the
+  // durable posts rather than from the request, so the reported counts are
+  // always what actually exists.
+  function seriesResult({ replayed, seriesId, intakeKey, posts, destinations, sourceCount, approveSeries, plan }) {
+    const first = posts[0] || null;
+    const occurrenceCount = plan
+      ? plan.occurrenceCount
+      : (first ? Number(first.seriesOccurrenceCount || 0) : 0);
+    const scheduledTimes = posts
+      .map((post) => Date.parse(post.scheduledAt || ''))
+      .filter((value) => Number.isFinite(value))
+      .sort((left, right) => left - right);
+    return {
+      replayed,
+      series: {
+        seriesId,
+        intakeKey,
+        frequency: 'daily',
+        startDate: first ? String(first.seriesStartDate || '') : '',
+        endDate: first ? String(first.seriesEndDate || '') : '',
+        timezone: first ? String(first.seriesTimezone || '') : '',
+        occurrenceCount,
+        destinationCount: destinations.length,
+        sourceCount,
+        // What was actually written, never what was requested.
+        createdCount: posts.length,
+        firstReleaseAt: scheduledTimes.length ? new Date(scheduledTimes[0]).toISOString() : '',
+        lastReleaseAt: scheduledTimes.length ? new Date(scheduledTimes[scheduledTimes.length - 1]).toISOString() : '',
+        approvedAtCreation: Boolean(approveSeries),
+        pendingApprovalCount: posts.filter((post) => !post.approved).length
+      },
+      items: posts.map(itemView)
+    };
+  }
+
   // ── Intake ───────────────────────────────────────────────────────────────
 
   async function createBatch(context, input = {}) {
@@ -287,6 +480,28 @@ function createBatchService(dependencies = {}) {
     }
 
     const scheduleMode = String(input.scheduleMode || 'interval').trim();
+
+    // Recurring daily is the opposite shape from batch scheduling: batch
+    // scheduling spreads N sources across N slots, a series repeats the SAME
+    // source across many dates. computeBatchSchedulePlan models source-slots
+    // and cannot express that, so recurring delegates to the recurring engine
+    // that already exists (maxScheduler.computeDailySchedulePlan, reached
+    // through applicationService.schedulePost's 'recurring_daily' mode)
+    // instead of growing a second recurrence implementation here.
+    //
+    // Everything before this point — media source, destinations, YouTube
+    // metadata, connectivity — has already been validated identically for both
+    // shapes, so the split happens as late as possible.
+    if (scheduleMode === RECURRING_DAILY_MODE) {
+      return createRecurringSeries(context, input, {
+        files,
+        mediaUrl,
+        destinations,
+        sourceCount,
+        youtubeTitle
+      });
+    }
+
     const staggerMinutes = scheduleMode === 'interval' ? normalizeStagger(input.staggerMinutes) : null;
     if (scheduleMode === 'interval' && staggerMinutes === null) {
       throw new BatchServiceError(
@@ -749,6 +964,51 @@ function createBatchService(dependencies = {}) {
     };
   }
 
+  // Recurring series the workspace owns, grouped from the durable posts that
+  // already carry their own series metadata. No series-level collection is
+  // invented: the group IS the series, and every number below is counted from
+  // what actually exists rather than from what was requested.
+  async function listSeries(context) {
+    const commercialContext = await resolveScope(context);
+    const posts = await storage.getPosts(context.userId, undefined, commercialContext.workspaceScope);
+    const groups = new Map();
+    for (const post of posts) {
+      const seriesId = String(post.seriesId || '').trim();
+      if (!seriesId) continue;
+      if (!groups.has(seriesId)) groups.set(seriesId, []);
+      groups.get(seriesId).push(post);
+    }
+
+    const series = [];
+    for (const [seriesId, members] of groups) {
+      const first = members[0];
+      const times = members
+        .map((post) => Date.parse(post.scheduledAt || ''))
+        .filter((value) => Number.isFinite(value))
+        .sort((left, right) => left - right);
+      series.push({
+        seriesId,
+        frequency: String(first.seriesFrequency || 'daily'),
+        startDate: String(first.seriesStartDate || ''),
+        endDate: String(first.seriesEndDate || ''),
+        timezone: String(first.seriesTimezone || ''),
+        occurrenceCount: Number(first.seriesOccurrenceCount || 0),
+        sourceCount: Number(first.seriesSourceCount || 0),
+        destinationCount: new Set(members.map((post) => post.accountId)).size,
+        jobCount: members.length,
+        pendingApprovalCount: members.filter((post) => !post.approved).length,
+        failedCount: members.filter((post) => post.status === 'failed').length,
+        postedCount: members.filter((post) => post.status === 'posted').length,
+        firstReleaseAt: times.length ? new Date(times[0]).toISOString() : '',
+        lastReleaseAt: times.length ? new Date(times[times.length - 1]).toISOString() : '',
+        createdAt: String(first.createdAt || ''),
+        updatedAt: String(first.updatedAt || first.createdAt || '')
+      });
+    }
+    series.sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+    return { series };
+  }
+
   // Composer capabilities for the signed-in workspace, resolved through the
   // same seam the write path enforces with — the UI and the server can never
   // disagree about what a package unlocks. Unverifiable plan truth degrades to
@@ -1000,6 +1260,7 @@ function createBatchService(dependencies = {}) {
     getBatchView,
     listBatches,
     listDestinations,
+    listSeries,
     getComposerCapabilities,
     resumePreparation,
     startPreparation,
@@ -1022,5 +1283,6 @@ module.exports = {
   createBatchService,
   deriveBatchId,
   MAX_DESTINATIONS,
+  RECURRING_DAILY_MODE,
   ...defaultService
 };

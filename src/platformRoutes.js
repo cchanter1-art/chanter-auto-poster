@@ -26,11 +26,13 @@ const platformModules = require('./platformModules');
 const platformStatus = require('./platformStatus');
 const platformWorkProviders = require('./platformWorkProviders');
 const { createAutoPosterWorkProvider } = require('./platformAutoPosterProvider');
+const { createRecurringSeriesWorkProvider } = require('./platformSeriesProvider');
 const { createOperatorWorkProvider } = require('./platformOperatorProvider');
 const { readConnectedHealth } = require('./runtimeConnectedHealth');
 const providers = require('./providers');
 const autoMusic = require('./autoMusic');
 const autoCaption = require('./autoCaption');
+const maxScheduler = require('./maxScheduler');
 const { groupDestinationsByProvider, countSelectableAccounts } = require('./destinationChips');
 const { requireAdminApi, requireAdminPage, resolveUserId } = require('./auth');
 const { isSupportedBatchUploadFile, BATCH_MEDIA_UPLOAD_MESSAGE } = require('./mediaPolicy');
@@ -178,6 +180,9 @@ function sendServiceError(res, error) {
 // not an outage, so no provider is registered and nothing is claimed.
 const workRegistry = platformWorkProviders.createWorkRegistry();
 workRegistry.register(createAutoPosterWorkProvider());
+// Recurring series occurrences are Release Queue jobs, so they register under
+// the module that owns that surface rather than under AutoPoster.
+workRegistry.register(createRecurringSeriesWorkProvider());
 const operatorWorkProvider = createOperatorWorkProvider(config.operatorWork);
 if (operatorWorkProvider) workRegistry.register(operatorWorkProvider);
 
@@ -355,7 +360,12 @@ router.get('/platform/compose', requireAdminPage, asyncRoute(async (req, res) =>
     autoMusicConfigured: autoMusic.isAutoMusicConfigured(),
     composeDefaults: {
       maxItems: capabilities.maxItemsPerDraft,
-      safetyBufferMinutes: config.batchIntake.safetyBufferMinutes
+      safetyBufferMinutes: config.batchIntake.safetyBufferMinutes,
+      // Real recurrence bounds from the engine that enforces them, so the
+      // preview cannot promise a series the server would refuse.
+      maxDailyOccurrences: maxScheduler.MAX_DAILY_OCCURRENCES,
+      maxRecurringJobs: maxScheduler.MAX_RECURRING_JOBS,
+      schedulingHorizonDays: capabilities.schedulingHorizonDays
     }
   });
 }));
@@ -462,6 +472,10 @@ router.post('/api/platform/batches', requireAdminApi, uploadBatchMedia, asyncRou
         description: req.body.youtubeDescription
       },
       scheduleMode: req.body.scheduleMode,
+      // Recurring series: one source set repeated across a bounded run of days.
+      // The service delegates the expansion to the existing recurring engine.
+      endDate: req.body.endDate,
+      approveSeries: String(req.body.approveSeries || '') === '1',
       startDate: req.body.startDate,
       startTime: req.body.startTime,
       timezoneName: req.body.timezoneName,

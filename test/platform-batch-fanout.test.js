@@ -416,6 +416,32 @@ test('one YouTube title may not silently describe several videos', async () => {
   assert.equal(world.posts.length, 0);
 });
 
+test('YouTube cannot be a recurring destination, even with a title', async () => {
+  // A series reuses one submission across many days; YouTube needs its own
+  // human-entered title per upload, so it is refused for recurrence rather
+  // than silently repeating one title across every occurrence. This runs here
+  // because it needs a genuinely connected, publishing-ready YouTube channel —
+  // otherwise the destination-availability check would fire first.
+  const world = makeWorld();
+  await assert.rejects(
+    world.batchService.createBatch(websiteContext(), {
+      scheduleMode: 'recurringDaily',
+      startDate: '2026-07-11', startTime: '09:00', endDate: '2026-07-15',
+      timezoneOffsetMinutes: 0, caption: 'series caption',
+      intakeKey: 'series-youtube',
+      destinations: [{ provider: 'youtube', accountId: 'UC-chanter' }],
+      youtube: { title: 'A title' },
+      files: [uploadFile('a.mp4')]
+    }),
+    (error) => {
+      assert.equal(error.code, 'provider_not_recurring');
+      assert.match(error.message, /own human-entered title/);
+      return true;
+    }
+  );
+  assert.equal(world.posts.length, 0, 'nothing durable is created by the refusal');
+});
+
 test('YouTube at intake succeeds with a typed title and carries it to the draft', async () => {
   const world = makeWorld();
   const result = await world.batchService.createBatch(websiteContext(), {

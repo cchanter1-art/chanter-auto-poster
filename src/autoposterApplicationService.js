@@ -1181,6 +1181,13 @@ function createAutoPosterApplicationService(dependencies = {}) {
       scheduleEntries: schedule.mode === 'recurring_daily' ? schedule.plan.jobs : undefined,
       scheduleSeries: schedule.mode === 'recurring_daily' ? schedule.plan.series : undefined,
       campaignStartAt: schedule.mode === 'recurring_daily' ? schedule.plan.baseAt : undefined,
+      // Caller-supplied campaign identity. storage already stamps this on every
+      // child job as `seriesId`; forwarding it lets a caller derive the id
+      // deterministically from its own intake key, which is what makes a
+      // multi-account series replay-safe (a per-post idempotencyKey cannot:
+      // it is constrained to exactly one channel). Absent, storage generates
+      // one exactly as before.
+      campaignId: String(input.campaignId || '').trim(),
       scheduleHistory: schedule.mode === 'explicit'
         ? (context.source === 'runtime'
             ? {

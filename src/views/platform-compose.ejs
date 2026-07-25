@@ -202,7 +202,31 @@
             </div>
             <% if (capabilities.advancedScheduling) { %>
               <details id="advanced-schedule" class="advanced-schedule hidden">
-                <summary>Κατανομή σε ημέρες &middot; Spread across days</summary>
+                <summary>Για προχωρημένους &middot; Advanced scheduling</summary>
+
+                <!-- Recurring is a scheduling CHOICE, not a mode: the same
+                     source set repeated across a bounded run of days. -->
+                <label class="toggle-row" id="repeat-daily-row">
+                  <input type="checkbox" id="repeat-daily">
+                  <span>Επανάληψη κάθε ημέρα &middot; Repeat daily</span>
+                </label>
+                <div id="recurring-panel" class="hidden">
+                  <div class="form-row cols-2">
+                    <div>
+                      <label class="field-label" for="seriesEndDate">Τελευταία ημέρα &middot; Last day</label>
+                      <input id="seriesEndDate" type="date">
+                    </div>
+                    <div></div>
+                  </div>
+                  <label class="toggle-row">
+                    <input type="checkbox" id="approveSeries">
+                    <span>Έγκριση όλης της σειράς τώρα &middot; Approve the whole series now</span>
+                  </label>
+                  <p class="section-note" id="series-approval-note"></p>
+                  <p class="section-note" id="series-preview" aria-live="polite"></p>
+                </div>
+
+                <div id="spread-modes">
                 <div class="mode-tabs" id="mode-tabs">
                   <button type="button" class="mode-tab active" data-mode="interval">Σειριακά</button>
                   <button type="button" class="mode-tab" data-mode="dateRange">Εύρος ημερών</button>
@@ -235,6 +259,7 @@
                   <label class="field-label">Ώρες ανά ημέρα</label>
                   <div id="daily-slot-list" class="slot-list"></div>
                   <button type="button" id="add-slot-btn" class="btn btn-quiet">+ Ώρα</button>
+                </div>
                 </div>
               </details>
             <% } %>
@@ -274,6 +299,11 @@
         advancedScheduling: capabilities.advancedScheduling
       }) %>;
       var SAFETY_BUFFER_MINUTES = <%= composeDefaults.safetyBufferMinutes %>;
+      // Recurrence bounds mirrored from the engine that enforces them, so the
+      // preview can never promise a series the server would refuse.
+      var MAX_DAILY_OCCURRENCES = <%= composeDefaults.maxDailyOccurrences %>;
+      var MAX_RECURRING_JOBS = <%= composeDefaults.maxRecurringJobs %>;
+      var SCHEDULING_HORIZON_DAYS = <%- JSON.stringify(composeDefaults.schedulingHorizonDays) %>;
 
       var dropzone = document.getElementById('dropzone');
       var fileInput = document.getElementById('file-input');
@@ -299,9 +329,20 @@
       var youtubeFields = document.getElementById('youtube-fields');
       var youtubeTitle = document.getElementById('youtubeTitle');
       var youtubeDescription = document.getElementById('youtubeDescription');
+      var repeatDaily = document.getElementById('repeat-daily');
+      var recurringPanel = document.getElementById('recurring-panel');
+      var seriesEndDate = document.getElementById('seriesEndDate');
+      var approveSeriesInput = document.getElementById('approveSeries');
+      var seriesPreview = document.getElementById('series-preview');
+      var seriesApprovalNote = document.getElementById('series-approval-note');
+      var spreadModes = document.getElementById('spread-modes');
       var selectedFiles = [];
       var currentMode = 'interval';
       var overrides = {};
+
+      function recurringOn() {
+        return Boolean(advanced && advanced.open && repeatDaily && repeatDaily.checked);
+      }
       // Auto Music derivatives staged for the exact files they were rendered
       // from. Keyed by name:size so a changed file list can never carry a stale
       // token forward.
@@ -339,6 +380,8 @@
       if (advanced) {
         document.getElementById('lastDay').value = localDate(tomorrow);
         document.getElementById('slotsLastDay').value = localDate(tomorrow);
+        // A one-week series is the smallest useful default; the user changes it.
+        if (seriesEndDate) seriesEndDate.value = localDate(new Date(Date.now() + 7 * 86400000));
       }
 
       // ── 1 · Files ──
@@ -584,6 +627,52 @@
         addSlotRow('10:00');
         document.getElementById('add-slot-btn').addEventListener('click', function () { addSlotRow(); update(); });
       }
+      // ── Recurring daily ──
+      // A series needs a definite first release, so enabling it selects the
+      // explicit Schedule option rather than the "earliest safe slot" default.
+      if (repeatDaily) {
+        repeatDaily.addEventListener('change', function () {
+          recurringPanel.classList.toggle('hidden', !repeatDaily.checked);
+          if (repeatDaily.checked) {
+            var at = document.querySelector('input[name="when"][value="at"]');
+            if (at) { at.checked = true; scheduleAt.classList.remove('hidden'); }
+          }
+          update();
+        });
+        [seriesEndDate, approveSeriesInput].forEach(function (el) {
+          if (el) el.addEventListener('change', update);
+        });
+      }
+
+      function daysInclusive(startStr, endStr) {
+        var start = Date.parse(startStr + 'T00:00:00Z');
+        var end = Date.parse(endStr + 'T00:00:00Z');
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+        return Math.floor((end - start) / 86400000) + 1;
+      }
+
+      // Mirrors maxScheduler.computeDailySchedulePlan's own arithmetic for a
+      // live preview only; the server stays authoritative at submit time.
+      function seriesShape() {
+        var startStr = document.getElementById('startDate').value;
+        var endStr = seriesEndDate ? seriesEndDate.value : '';
+        var occurrences = (startStr && endStr) ? daysInclusive(startStr, endStr) : null;
+        if (!occurrences) return { ok: false, reason: 'Ορίστε πρώτη και τελευταία ημέρα' };
+        if (occurrences > MAX_DAILY_OCCURRENCES) {
+          return { ok: false, reason: 'Έως ' + MAX_DAILY_OCCURRENCES + ' ημέρες' };
+        }
+        if (SCHEDULING_HORIZON_DAYS !== null && occurrences > SCHEDULING_HORIZON_DAYS) {
+          return { ok: false, reason: 'Το πακέτο σας φτάνει ' + SCHEDULING_HORIZON_DAYS + ' ημέρες μπροστά' };
+        }
+        var sources = selectedFiles.length > 0 ? selectedFiles.length : (usingUrlSource() ? 1 : 0);
+        var accounts = selectedDestinations().length;
+        var jobs = occurrences * accounts * sources;
+        if (accounts > 0 && sources > 0 && jobs > MAX_RECURRING_JOBS) {
+          return { ok: false, reason: 'Έως ' + MAX_RECURRING_JOBS + ' δημοσιεύσεις ανά σειρά (' + jobs + ')' };
+        }
+        return { ok: true, occurrences: occurrences, jobs: jobs, startDate: startStr, endDate: endStr };
+      }
+
       function dailySlotValues() {
         if (!advanced) return [];
         return Array.prototype.slice.call(document.querySelectorAll('.slot-time'))
@@ -593,6 +682,12 @@
 
       // ── 5 · Review ──
       function scheduleSummary() {
+        if (recurringOn()) {
+          var shape = seriesShape();
+          if (!shape.ok) return '';
+          var time = document.getElementById('startTime').value;
+          return 'Καθημερινά ' + shape.startDate + ' → ' + shape.endDate + ' · ' + time;
+        }
         if (advanced && advanced.open && currentMode === 'dateRange') return 'Κατανομή σε ημέρες';
         if (advanced && advanced.open && currentMode === 'dailySlots') return 'Καθορισμένες ώρες';
         if (currentWhen() === 'soonest') {
@@ -642,7 +737,12 @@
         if (perAccountToggleRow) perAccountToggleRow.classList.toggle('hidden', destinations.length < 2);
         if (perAccountLocked) perAccountLocked.classList.toggle('hidden', destinations.length < 2);
         if (perAccountToggle && perAccountToggle.checked) renderOverrideRows();
-        if (advanced) advanced.classList.toggle('hidden', sourceCount < 2);
+        // Advanced scheduling is reachable as soon as there is anything to
+        // schedule: recurring is meaningful with a single source, while the
+        // multi-day spread modes only make sense past one.
+        if (advanced) advanced.classList.toggle('hidden', sourceCount < 1);
+        if (spreadModes) spreadModes.classList.toggle('hidden', sourceCount < 2 || recurringOn());
+        if (recurringPanel) recurringPanel.classList.toggle('hidden', !repeatDaily || !repeatDaily.checked);
 
         if (soundNote) {
           soundNote.classList.toggle('hidden', !destinations.some(function (dest) {
@@ -655,21 +755,45 @@
         var youtubeTitleOk = !wantsYouTube || Boolean(youtubeTitle && youtubeTitle.value.trim());
         var youtubeSourceOk = !wantsYouTube || sourceCount === 1;
 
+        // Recurring: every occurrence reuses one caption, and YouTube cannot be
+        // a recurring destination because each upload needs its own title.
+        var series = recurringOn() ? seriesShape() : null;
+        var recurringCaptionOk = !series || Boolean(captionEl.value.trim());
+        var recurringProviderOk = !series || !wantsYouTube;
+        var recurringOk = !series || (series.ok && recurringCaptionOk && recurringProviderOk);
+
+        if (series && seriesApprovalNote) {
+          // Accurate to repository behaviour: approveSeries approves every
+          // generated draft at creation. It is not a pre-authorisation of
+          // anything that does not exist yet.
+          seriesApprovalNote.textContent = approveSeriesInput && approveSeriesInput.checked
+            ? 'Και οι ' + (series.ok ? series.jobs : 0) + ' δημοσιεύσεις εγκρίνονται τώρα. · All generated drafts are approved at creation.'
+            : 'Κάθε δημοσίευση μένει προσχέδιο μέχρι να την εγκρίνετε. · Every occurrence stays a draft until you approve it.';
+        }
+        if (series && seriesPreview) {
+          seriesPreview.textContent = series.ok
+            ? series.occurrences + ' ημέρες × ' + destinations.length + ' λογαριασμοί × ' + sourceCount
+              + ' = ' + series.jobs + ' δημοσιεύσεις'
+            : series.reason;
+          seriesPreview.style.color = series.ok ? '' : 'var(--danger)';
+        }
+
         var uploadOk = setStep('upload', sourceCount > 0,
           urlSource ? 'URL' : (files > 0 ? files + ' αρχεία' : ''));
         var accountsOk = setStep('accounts', destinations.length > 0,
           destinations.length > 0 ? String(destinations.length) : '');
-        var captionOk = setStep('caption', youtubeTitleOk,
+        var captionOk = setStep('caption', youtubeTitleOk && recurringCaptionOk,
           wantsYouTube && !youtubeTitleOk
             ? 'Λείπει τίτλος'
-            : (captionEl.value.trim() ? 'Καθορισμένη' : 'Αυτόματη'));
-        var scheduleOk = setStep('schedule', Boolean(when), when);
+            : (!recurringCaptionOk
+                ? 'Απαιτείται για σειρά'
+                : (captionEl.value.trim() ? 'Καθορισμένη' : 'Αυτόματη')));
+        var scheduleOk = setStep('schedule', Boolean(when) && recurringOk, when);
         var ready = uploadOk && accountsOk && captionOk && scheduleOk
-          && youtubeSourceOk && !musicPending;
+          && youtubeSourceOk && recurringOk && !musicPending;
         setStep('review', ready, ready ? 'Έτοιμο' : '');
 
-        reviewList.innerHTML = '';
-        [
+        var rows = [
           [uploadOk, urlSource
             ? 'Media URL'
             : (files ? files + (files === 1 ? ' αρχείο' : ' αρχεία') : 'Προσθέστε αρχεία ή URL')],
@@ -678,14 +802,33 @@
             : 'Επιλέξτε λογαριασμό'],
           [captionOk, wantsYouTube && !youtubeTitleOk
             ? 'Απαιτείται τίτλος YouTube'
-            : (captionEl.value.trim() ? 'Λεζάντα έτοιμη' : 'Λεζάντα: αυτόματη προετοιμασία')],
-          [scheduleOk, when || 'Ορίστε χρόνο'],
-          [ready, ready
-            ? 'Έτοιμο'
-            : (!youtubeSourceOk
-                ? 'Το YouTube δέχεται ένα βίντεο τη φορά'
-                : (musicPending ? 'Προετοιμασία μουσικής…' : 'Δεν είναι έτοιμο'))]
-        ].forEach(function (entry) {
+            : (!recurringCaptionOk
+                ? 'Η σειρά χρειάζεται μία λεζάντα'
+                : (captionEl.value.trim() ? 'Λεζάντα έτοιμη' : 'Λεζάντα: αυτόματη προετοιμασία'))],
+          [scheduleOk, when || (series && !series.ok ? series.reason : 'Ορίστε χρόνο')]
+        ];
+        // A series states exactly what will be created before Accept: how many
+        // occurrences, over which dates, in which timezone, and whether a human
+        // still has to approve them.
+        if (series) {
+          rows.push([series.ok, series.ok
+            ? series.occurrences + ' εμφανίσεις · ' + series.jobs + ' δημοσιεύσεις'
+            : series.reason]);
+          rows.push([recurringProviderOk, recurringProviderOk
+            ? (approveSeriesInput && approveSeriesInput.checked
+                ? 'Εγκρίνεται όλη η σειρά τώρα'
+                : 'Κάθε δημοσίευση χρειάζεται έγκριση')
+            : 'Το YouTube δεν μπορεί να είναι επαναλαμβανόμενος προορισμός']);
+          rows.push([true, 'Ζώνη ώρας: ' + (Intl.DateTimeFormat().resolvedOptions().timeZone || 'local')]);
+        }
+        rows.push([ready, ready
+          ? 'Έτοιμο'
+          : (!youtubeSourceOk
+              ? 'Το YouTube δέχεται ένα βίντεο τη φορά'
+              : (musicPending ? 'Προετοιμασία μουσικής…' : 'Δεν είναι έτοιμο'))]);
+
+        reviewList.innerHTML = '';
+        rows.forEach(function (entry) {
           var li = document.createElement('li');
           li.className = entry[0] ? 'review-ok' : 'review-todo';
           li.textContent = (entry[0] ? '✔ ' : '· ') + entry[1];
@@ -721,7 +864,15 @@
         data.append('intakeKey', (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
 
         var usingAdvanced = advanced && advanced.open && currentMode !== 'interval';
-        if (usingAdvanced && currentMode === 'dateRange') {
+        if (recurringOn()) {
+          // One source set, one caption, repeated daily between two dates. The
+          // server expands the occurrences through the existing engine.
+          data.append('scheduleMode', 'recurringDaily');
+          data.append('startDate', document.getElementById('startDate').value);
+          data.append('startTime', document.getElementById('startTime').value);
+          data.append('endDate', seriesEndDate.value);
+          if (approveSeriesInput && approveSeriesInput.checked) data.append('approveSeries', '1');
+        } else if (usingAdvanced && currentMode === 'dateRange') {
           data.append('scheduleMode', 'dateRange');
           data.append('firstDay', localDate(earliestSafeBase()));
           data.append('lastDay', document.getElementById('lastDay').value);
@@ -750,6 +901,12 @@
           .then(function (payload) {
             if (payload && payload.ok && payload.batch) {
               window.location.href = '/platform/compose/' + encodeURIComponent(payload.batch.batchId);
+              return;
+            }
+            // A series has no batch to review: its occurrences are ordinary
+            // queue jobs, so it lands on Work where the series is projected.
+            if (payload && payload.ok && payload.series) {
+              window.location.href = '/platform/work';
               return;
             }
             submitBtn.disabled = false;
