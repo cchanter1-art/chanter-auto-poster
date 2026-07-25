@@ -20,6 +20,7 @@
     <% if (workError) { %>
       <div class="notice notice-error" data-testid="work-error">Evidence is unavailable right now. &middot; <%= workError %></div>
     <% } %>
+    <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
 
     <% if (items.length === 0) { %>
       <div class="empty-state" data-testid="evidence-empty">
@@ -28,22 +29,13 @@
     <% } else { %>
       <div class="batch-list" data-testid="evidence-list">
         <% items.forEach(function (item) { %>
-          <% const view = platformStatus.presentation(item.state); %>
-          <a class="batch-row" href="<%= item.href %>" data-work="<%= item.workId %>" data-state="<%= item.state %>">
-            <div>
-              <div><%= item.title %></div>
-              <div class="meta">
-                <%= item.moduleId === 'autoposter' ? 'AutoPoster' : item.moduleId %>
-                <% if (item.createdAt) { %>&middot; <%= item.createdAt %><% } %>
-              </div>
-            </div>
-            <div class="counts">
-              <%= item.counts.prepared %> prepared &middot;
-              <%= item.counts.failed %> failed &middot;
-              <%= item.counts.accepted %> approved
-            </div>
-            <span class="chip <%= view.chip %>"><%= view.label %></span>
-          </a>
+          <%- include('_platform-work-row', {
+            item: item,
+            view: platformStatus.presentation(item.state),
+            metaText: item.createdAt,
+            countsText: `${item.counts.prepared} prepared · ${item.counts.failed} failed · ${item.counts.accepted} approved`,
+            chipLabel: platformStatus.presentation(item.state).label
+          }) %>
         <% }); %>
       </div>
     <% } %>

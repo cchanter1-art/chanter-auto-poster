@@ -19,6 +19,7 @@
     <% if (workError) { %>
       <div class="notice notice-error" data-testid="work-error">Work is unavailable right now. &middot; <%= workError %></div>
     <% } %>
+    <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
 
     <h2 class="section-title">Work at a glance</h2>
     <div class="stat-grid" data-testid="overview-summary">

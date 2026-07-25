@@ -24,6 +24,9 @@ const applicationService = require('./autoposterApplicationService');
 const batchService = require('./batchService');
 const platformModules = require('./platformModules');
 const platformStatus = require('./platformStatus');
+const platformWorkProviders = require('./platformWorkProviders');
+const { createAutoPosterWorkProvider } = require('./platformAutoPosterProvider');
+const { createOperatorWorkProvider } = require('./platformOperatorProvider');
 const { readConnectedHealth } = require('./runtimeConnectedHealth');
 const providers = require('./providers');
 const { groupDestinationsByProvider, countSelectableAccounts } = require('./destinationChips');
@@ -134,18 +137,37 @@ function sendServiceError(res, error) {
 
 // ── Shell projections (read-only) ──────────────────────────────────────────
 
-// Every shell surface degrades to an empty projection plus a visible reason
-// instead of a 500: an unreachable store must not make the Platform itself look
-// broken, and it must never look healthy either.
+// The Platform's work providers. The shell iterates this registry; it does not
+// know which modules produced what, so a new module reaches Work / Approvals /
+// Evidence by registering here and nothing on those surfaces changes.
+//
+// Operator registers only when OPERATOR_BASE_URL is configured. Unconfigured is
+// not an outage, so no provider is registered and nothing is claimed.
+const workRegistry = platformWorkProviders.createWorkRegistry();
+workRegistry.register(createAutoPosterWorkProvider());
+const operatorWorkProvider = createOperatorWorkProvider(config.operatorWork);
+if (operatorWorkProvider) workRegistry.register(operatorWorkProvider);
+
+// Every shell surface degrades to a partial or empty projection plus a visible
+// reason instead of a 500: an unreachable module must not make the Platform
+// itself look broken, and it must never look healthy either. A module that
+// fails is named; the modules that answered are still reported.
 async function loadPlatformWork(req) {
   try {
-    const { batches } = await batchService.listBatches(websiteContext(req));
-    const items = platformStatus.sortWork(batches.map(platformStatus.projectAutoPosterBatch));
-    return { items, summary: platformStatus.summarizeWork(items), error: '' };
+    const collected = await workRegistry.collect(websiteContext(req));
+    return {
+      items: collected.items,
+      summary: collected.summary,
+      degraded: collected.degraded,
+      error: collected.error
+    };
   } catch (error) {
+    // The registry isolates provider failures itself, so reaching here means
+    // the aggregation layer could not run at all.
     return {
       items: [],
       summary: platformStatus.summarizeWork([]),
+      degraded: [],
       error: (error && error.message) || 'Work is unavailable right now.'
     };
   }
@@ -187,7 +209,8 @@ router.get('/platform', requireAdminPage, asyncRoute(async (req, res) => {
     customerModules: platformModules.listCustomerModules(),
     internalModuleCount: platformModules.listInternalModules().length,
     workSummary: work.summary,
-    workError: work.error
+    workError: work.error,
+    workDegraded: work.degraded
   });
 }));
 
@@ -208,7 +231,9 @@ router.get('/platform/work', requireAdminPage, asyncRoute(async (req, res) => {
     platformStatus,
     items: work.items,
     workSummary: work.summary,
-    workError: work.error
+    workError: work.error,
+    workDegraded: work.degraded,
+    firstCustomerModule: platformModules.listCustomerModules()[0] || null
   });
 }));
 
@@ -219,7 +244,8 @@ router.get('/platform/approvals', requireAdminPage, asyncRoute(async (req, res) 
     active: 'approvals',
     platformStatus,
     items: work.items.filter((item) => item.needsApproval),
-    workError: work.error
+    workError: work.error,
+    workDegraded: work.degraded
   });
 }));
 
@@ -229,8 +255,10 @@ router.get('/platform/evidence', requireAdminPage, asyncRoute(async (req, res) =
     appName: config.appName,
     active: 'evidence',
     platformStatus,
-    items: work.items,
-    workError: work.error
+    // Only work that actually carries a durable record is indexable here.
+    items: work.items.filter((item) => item.evidenceAvailable),
+    workError: work.error,
+    workDegraded: work.degraded
   });
 }));
 
@@ -242,6 +270,8 @@ router.get('/platform/health', requireAdminPage, asyncRoute(async (req, res) => 
     health,
     workSummary: work.summary,
     workError: work.error,
+    workDegraded: work.degraded,
+    workProviderCount: workRegistry.list().length,
     customerModuleCount: platformModules.listCustomerModules().length,
     internalModuleCount: platformModules.listInternalModules().length
   });
@@ -305,7 +335,16 @@ router.get('/api/platform/modules', requireAdminApi, (req, res) => {
 router.get('/api/platform/work', requireAdminApi, asyncRoute(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const work = await loadPlatformWork(req);
-  res.json({ ok: !work.error, items: work.items, summary: work.summary, reason: work.error });
+  res.json({
+    ok: !work.error,
+    items: work.items,
+    summary: work.summary,
+    // Which modules answered and which could not, so an API consumer can tell a
+    // partial read from a whole one without inspecting the item list.
+    providers: workRegistry.list(),
+    degraded: work.degraded,
+    reason: work.error
+  });
 }));
 
 router.get('/api/platform/health', requireAdminApi, asyncRoute(async (req, res) => {

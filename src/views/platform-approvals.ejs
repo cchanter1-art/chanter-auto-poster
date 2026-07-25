@@ -20,6 +20,7 @@
     <% if (workError) { %>
       <div class="notice notice-error" data-testid="work-error">Approvals are unavailable right now. &middot; <%= workError %></div>
     <% } %>
+    <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
 
     <% if (items.length === 0) { %>
       <div class="empty-state" data-testid="approvals-empty">
@@ -28,18 +29,15 @@
     <% } else { %>
       <div class="batch-list" data-testid="approvals-list">
         <% items.forEach(function (item) { %>
-          <% const view = platformStatus.presentation(item.state); %>
-          <a class="batch-row" href="<%= item.href %>" data-work="<%= item.workId %>" data-state="<%= item.state %>">
-            <div>
-              <div><%= item.title %></div>
-              <div class="meta">
-                <%= item.moduleId === 'autoposter' ? 'AutoPoster' : item.moduleId %>
-                &middot; <%= item.stateReason %>
-              </div>
-            </div>
-            <div class="counts"><%= item.counts.awaiting %> to review</div>
-            <span class="chip <%= view.chip %>">Open to review</span>
-          </a>
+          <%- include('_platform-work-row', {
+            item: item,
+            view: platformStatus.presentation(item.state),
+            metaText: item.stateReason,
+            countsText: `${item.counts.awaiting} to review`,
+            // Internal work is listed so the count is honest, but it is never
+            // offered as something to open: its approver is not this customer.
+            chipLabel: item.actionable ? 'Open to review' : 'Internal approval'
+          }) %>
         <% }); %>
       </div>
     <% } %>

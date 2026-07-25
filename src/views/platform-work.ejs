@@ -20,6 +20,7 @@
     <% if (workError) { %>
       <div class="notice notice-error" data-testid="work-error">Work is unavailable right now. &middot; <%= workError %></div>
     <% } %>
+    <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
 
     <div class="batch-summary" data-testid="work-summary">
       <div class="stat"><strong><%= workSummary.total %></strong> total</div>
@@ -31,25 +32,20 @@
     <% if (items.length === 0) { %>
       <div class="empty-state" data-testid="work-empty">
         <div>No work yet.</div>
-        <div class="en">Start one from the <a href="/platform/autoposter">AutoPoster</a> module.</div>
+        <% if (locals.firstCustomerModule) { %>
+          <div class="en">Start one from the <a href="<%= locals.firstCustomerModule.href %>"><%= locals.firstCustomerModule.name %></a> module.</div>
+        <% } %>
       </div>
     <% } else { %>
       <div class="batch-list" data-testid="work-list">
         <% items.forEach(function (item) { %>
-          <% const view = platformStatus.presentation(item.state); %>
-          <a class="batch-row" href="<%= item.href %>" data-work="<%= item.workId %>" data-state="<%= item.state %>">
-            <div>
-              <div><%= item.title %></div>
-              <div class="meta">
-                <%= item.moduleId === 'autoposter' ? 'AutoPoster' : item.moduleId %>
-                &middot; <%= item.stateReason %>
-              </div>
-            </div>
-            <div class="counts">
-              <%= item.counts.accepted %>/<%= item.counts.total %> approved
-            </div>
-            <span class="chip <%= view.chip %>"><%= view.label %></span>
-          </a>
+          <%- include('_platform-work-row', {
+            item: item,
+            view: platformStatus.presentation(item.state),
+            metaText: item.stateReason,
+            countsText: `${item.counts.accepted}/${item.counts.total} approved`,
+            chipLabel: platformStatus.presentation(item.state).label
+          }) %>
         <% }); %>
       </div>
     <% } %>

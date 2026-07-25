@@ -1,0 +1,16 @@
+<%
+// One Platform work row, shared by Work, Approvals and Evidence. Those three
+// surfaces render whatever the providers produced without knowing which module
+// produced it, so a new module needs no edit here or in them.
+//
+// A row is clickable only when the owning module granted it a route.
+// platformWorkProviders strips the href from every internal module's work, so
+// internal work renders as inert text: declared and counted, never openable and
+// never a control on this customer surface.
+const linked = Boolean(item.href);
+%>
+<% if (linked) { %>
+  <a class="batch-row" href="<%= item.href %>" data-work="<%= item.workId %>" data-state="<%= item.state %>" data-module="<%= item.moduleId %>" data-actionable="true"><%- include('_platform-work-row-body', { item: item, view: view, metaText: metaText, countsText: countsText, chipLabel: chipLabel }) %></a>
+<% } else { %>
+  <div class="batch-row batch-row-static" data-work="<%= item.workId %>" data-state="<%= item.state %>" data-module="<%= item.moduleId %>" data-actionable="false"><%- include('_platform-work-row-body', { item: item, view: view, metaText: metaText, countsText: countsText, chipLabel: chipLabel }) %></div>
+<% } %>

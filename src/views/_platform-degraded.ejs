@@ -1,0 +1,17 @@
+<%
+// Partial-read notice. A module that could not be read is named here by module,
+// on every surface, while the modules that did answer are still shown.
+//
+// This is deliberately separate from the full work-error notice: "Operator
+// could not be read" and "no work could be read at all" are different facts,
+// and collapsing the first into the second would either hide a failure or
+// invent one. When every provider fails the error notice takes over and this
+// one is not rendered.
+const degradedProviders = locals.workDegraded || [];
+%>
+<% if (!locals.workError && degradedProviders.length > 0) { %>
+  <div class="notice notice-warn" data-testid="work-degraded">
+    Showing a partial view.
+    <% degradedProviders.forEach(function (entry, index) { %><%= index > 0 ? ' · ' : ' ' %><span data-degraded="<%= entry.moduleId %>"><%= entry.moduleName %>: <%= entry.reason %></span><% }); %>
+  </div>
+<% } %>

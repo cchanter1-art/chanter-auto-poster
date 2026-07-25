@@ -89,8 +89,75 @@ function projectAutoPosterBatch(record = {}) {
     needsApproval: state === WORK_STATE.WAITING_APPROVAL && awaiting > 0,
     href: batchId ? `/platform/autoposter/batches/${encodeURIComponent(batchId)}` : '',
     createdAt: String(record.createdAt || ''),
+    updatedAt: String(record.updatedAt || record.createdAt || ''),
+    // Every batch carries a durable record, so every batch is indexable on the
+    // Evidence surface — including an empty one, whose evidence is that nothing
+    // was ever added to it.
+    evidenceAvailable: true,
     videoCount: Number(record.videoCount || 0),
     destinationCount: Number(record.destinationCount || 0)
+  };
+}
+
+// Operator's durable mission-graph vocabulary (chanter.mission.graph.v1,
+// MissionGraphState in the Operator repository) is:
+//   approval_required | approved | running | completed
+//   | failed_recoverable | failed_terminal | cancelled
+//
+// approved is transient by construction: approveGraph transitions to it and
+// immediately runs the scheduler, so reporting it as running is the honest
+// reading rather than an optimistic one. Both failure states are failures —
+// recoverable says how it can be recovered, not that it is fine — and recovery
+// is an internal control action that this surface never offers.
+function operatorGraphStateOf(record) {
+  const status = String(record.status || '').trim();
+  if (status === 'approval_required') return { state: WORK_STATE.WAITING_APPROVAL, reason: 'Waiting for an internal approver.' };
+  if (status === 'approved') return { state: WORK_STATE.RUNNING, reason: 'Approved; execution scheduled.' };
+  if (status === 'running') return { state: WORK_STATE.RUNNING, reason: 'Mission execution in progress.' };
+  if (status === 'completed') return { state: WORK_STATE.COMPLETED, reason: 'All mission steps completed.' };
+  if (status === 'failed_recoverable') return { state: WORK_STATE.FAILED, reason: 'Recoverable failure; recovery is an internal control action.' };
+  if (status === 'failed_terminal') return { state: WORK_STATE.FAILED, reason: 'Terminal failure.' };
+  if (status === 'cancelled') return { state: WORK_STATE.PAUSED, reason: 'Cancelled by an internal operator.' };
+  // Same doctrine as AutoPoster: an unrecognised module status is reported as
+  // idle with the raw value shown, never guessed into looking like progress.
+  return { state: WORK_STATE.IDLE, reason: status ? `Module status: ${status}` : 'Unknown status.' };
+}
+
+const OPERATOR_NODE_FAILURE_STATES = new Set(['failed_recoverable', 'failed_terminal']);
+
+// Projects one Operator mission graph into a Platform work item. Node tallies
+// stand in for the item tallies AutoPoster reports, so the shared counts column
+// means the same thing on both: how much of this unit of work is done, how much
+// broke, how much a person has cleared.
+//
+// Operator is an internal module. This projection therefore proposes no link at
+// all — and platformWorkProviders would strip one anyway, since the registry
+// gives internal modules no route.
+function projectOperatorMissionGraph(record = {}) {
+  const { state, reason } = operatorGraphStateOf(record);
+  const nodes = Array.isArray(record.nodes) ? record.nodes : [];
+  const total = Number(record.nodeCount || nodes.length || 0);
+  const prepared = nodes.filter((node) => String(node && node.status) === 'completed').length;
+  const failed = nodes.filter((node) => OPERATOR_NODE_FAILURE_STATES.has(String(node && node.status))).length;
+  // Approval on a graph is granted once, for the whole compiled graph, so it
+  // clears every step at once rather than item by item.
+  const approved = record.approvedBy ? total : 0;
+  const awaiting = Math.max(0, total - approved);
+  const graphId = String(record.graphId || '');
+  return {
+    moduleId: 'operator',
+    workId: graphId,
+    title: String(record.objective || '').trim() || `Mission ${graphId.slice(0, 8) || '—'}`,
+    state,
+    stateReason: reason,
+    counts: { total, prepared, failed, accepted: approved, awaiting },
+    needsApproval: state === WORK_STATE.WAITING_APPROVAL && awaiting > 0,
+    href: '',
+    createdAt: String(record.createdAt || ''),
+    updatedAt: String(record.updatedAt || record.createdAt || ''),
+    // A compiled graph carries a durable node set and event journal, so it can
+    // be indexed here. The journal itself stays behind the Operator boundary.
+    evidenceAvailable: total > 0
   };
 }
 
@@ -126,6 +193,7 @@ module.exports = {
   WORK_STATE_PRESENTATION,
   presentation,
   projectAutoPosterBatch,
+  projectOperatorMissionGraph,
   summarizeWork,
   sortWork
 };

@@ -57,6 +57,27 @@
           <% } %>
         </div>
         <% if (workError) { %><div class="health-detail-en"><%= workError %></div><% } %>
+        <%
+        // A partial read is reported as a partial read. The count above stays
+        // truthful about what was read; this line names what was not, so a
+        // module outage can never hide behind a healthy-looking total.
+        const degradedProviders = locals.workDegraded || [];
+        %>
+        <% if (!workError && degradedProviders.length > 0) { %>
+          <div class="health-detail-en" data-testid="health-work-degraded">
+            Partial: <% degradedProviders.forEach(function (entry, index) { %><%= index > 0 ? ', ' : '' %><%= entry.moduleName %><% }); %> could not be read.
+          </div>
+        <% } %>
+      </div>
+
+      <div class="panel health-card" data-health="providers">
+        <div class="health-head">
+          <div class="health-name">Work sources</div>
+          <span class="chip <%= (locals.workDegraded || []).length > 0 || workError ? 'chip-attention' : 'chip-neutral' %>"><%= locals.workProviderCount || 0 %></span>
+        </div>
+        <div class="health-detail">
+          <%= (locals.workProviderCount || 0) - (locals.workDegraded || []).length %> of <%= locals.workProviderCount || 0 %> registered modules answered.
+        </div>
       </div>
     </div>
 

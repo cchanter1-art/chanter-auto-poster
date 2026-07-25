@@ -57,6 +57,16 @@ module.exports = {
     token: process.env.RUNTIME_CONTROL_TOKEN || ''
   },
 
+  // Operator mission graphs as a read-only Platform work provider
+  // (src/platformOperatorProvider.js). Off unless a base URL is set: Operator
+  // is a local-first internal service on 127.0.0.1, so a deployed AutoPoster
+  // leaves this empty and registers no Operator provider at all. Reads are GET
+  // only and can never move Operator state.
+  operatorWork: {
+    baseUrl: (process.env.OPERATOR_BASE_URL || '').trim(),
+    timeoutMs: Math.max(250, Number(process.env.OPERATOR_WORK_TIMEOUT_MS || 2500))
+  },
+
   scheduler: {
     // How long a post is allowed to sit in "processing" before the
     // watchdog assumes the worker crashed and reclaims it.

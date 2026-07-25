@@ -1,0 +1,16 @@
+<%
+// The inside of one Platform work row. Shared by the linked and unlinked
+// wrappers in _platform-work-row.ejs so the two render identically apart from
+// being clickable — an internal row must not look like a downgraded version of
+// a customer row, only like one you cannot open.
+//
+// The module name comes from the canonical item (stamped by
+// platformWorkProviders from the registry), never from a per-module conditional
+// in a shell surface.
+%>
+<div>
+  <div><%= item.title %></div>
+  <div class="meta"><%= item.moduleName %><% if (metaText) { %> &middot; <%= metaText %><% } %></div>
+</div>
+<div class="counts"><%= countsText %></div>
+<span class="chip <%= view.chip %>"><%= chipLabel %></span>
