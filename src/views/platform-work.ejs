@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Εργασίες — CHANTER Platform</title>
+  <link rel="stylesheet" href="/platform/platform.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('_platform-nav', { active: locals.active || '' }) %>
+
+    <div class="breadcrumb"><a href="/platform">Πλατφόρμα</a> / Εργασίες</div>
+    <h1 class="page-title">Εργασίες</h1>
+    <p class="page-subtitle">
+      Όλη η εργασία της πλατφόρμας, από κάθε ενότητα, σε μία κοινή γλώσσα καταστάσεων.
+      &middot; All platform work, from every module, in one shared state vocabulary.
+    </p>
+
+    <% if (workError) { %>
+      <div class="notice notice-error" data-testid="work-error">Οι εργασίες δεν είναι διαθέσιμες αυτή τη στιγμή. &middot; <%= workError %></div>
+    <% } %>
+
+    <div class="batch-summary" data-testid="work-summary">
+      <div class="stat"><strong><%= workSummary.total %></strong> σύνολο &middot; total</div>
+      <div class="stat"><strong><%= workSummary.running %></strong> σε εξέλιξη &middot; running</div>
+      <div class="stat"><strong><%= workSummary.awaitingApproval %></strong> αναμονή έγκρισης &middot; waiting for approval</div>
+      <div class="stat"><strong><%= workSummary.failed %></strong> απέτυχαν &middot; failed</div>
+    </div>
+
+    <% if (items.length === 0) { %>
+      <div class="empty-state" data-testid="work-empty">
+        <div>Δεν υπάρχει καμία εργασία αυτή τη στιγμή.</div>
+        <div class="en">No work yet. Start one from the <a href="/platform/autoposter">AutoPoster</a> module.</div>
+      </div>
+    <% } else { %>
+      <div class="batch-list" data-testid="work-list">
+        <% items.forEach(function (item) { %>
+          <% const view = platformStatus.presentation(item.state); %>
+          <a class="batch-row" href="<%= item.href %>" data-work="<%= item.workId %>" data-state="<%= item.state %>">
+            <div>
+              <div><%= item.title %></div>
+              <div class="meta">
+                <%= item.moduleId === 'autoposter' ? 'AutoPoster' : item.moduleId %>
+                &middot; <%= item.stateReason %>
+              </div>
+            </div>
+            <div class="counts">
+              <%= item.counts.accepted %>/<%= item.counts.total %> εγκεκριμένα
+            </div>
+            <span class="chip <%= view.chip %>" title="<%= view.labelEn %>"><%= view.label %></span>
+          </a>
+        <% }); %>
+      </div>
+    <% } %>
+
+    <p class="footer-note">
+      Οι ενέργειες εκτελούνται μέσα στην ενότητα που κατέχει την εργασία. Αυτή η σελίδα είναι μόνο για ανάγνωση.
+      &middot; Actions happen inside the module that owns the work. This page is read-only.
+    </p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Τεκμήρια — CHANTER Platform</title>
+  <link rel="stylesheet" href="/platform/platform.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('_platform-nav', { active: locals.active || '' }) %>
+
+    <div class="breadcrumb"><a href="/platform">Πλατφόρμα</a> / Τεκμήρια</div>
+    <h1 class="page-title">Τεκμήρια</h1>
+    <p class="page-subtitle">
+      Για κάθε εργασία: τι προετοιμάστηκε, τι απέτυχε, τι εγκρίθηκε — και πού να το επιθεωρήσετε.
+      &middot; For every unit of work: what was prepared, what failed, what was approved, and where to inspect it.
+    </p>
+
+    <% if (workError) { %>
+      <div class="notice notice-error" data-testid="work-error">Τα τεκμήρια δεν είναι διαθέσιμα αυτή τη στιγμή. &middot; <%= workError %></div>
+    <% } %>
+
+    <% if (items.length === 0) { %>
+      <div class="empty-state" data-testid="evidence-empty">
+        <div>Δεν υπάρχουν ακόμη τεκμήρια.</div>
+        <div class="en">No evidence records yet.</div>
+      </div>
+    <% } else { %>
+      <div class="batch-list" data-testid="evidence-list">
+        <% items.forEach(function (item) { %>
+          <% const view = platformStatus.presentation(item.state); %>
+          <a class="batch-row" href="<%= item.href %>" data-work="<%= item.workId %>" data-state="<%= item.state %>">
+            <div>
+              <div><%= item.title %></div>
+              <div class="meta">
+                <%= item.moduleId === 'autoposter' ? 'AutoPoster' : item.moduleId %>
+                <% if (item.createdAt) { %>&middot; <%= item.createdAt %><% } %>
+              </div>
+            </div>
+            <div class="counts">
+              <%= item.counts.prepared %> προετοιμασμένα &middot;
+              <%= item.counts.failed %> αποτυχίες &middot;
+              <%= item.counts.accepted %> εγκεκριμένα
+            </div>
+            <span class="chip <%= view.chip %>" title="<%= view.labelEn %>"><%= view.label %></span>
+          </a>
+        <% }); %>
+      </div>
+    <% } %>
+
+    <p class="footer-note">
+      Τα πλήρη εσωτερικά τεκμήρια εκτέλεσης (agent run ledger, runtime evidence) τηρούνται πίσω από το Operator και δεν εκτίθενται εδώ.
+      &middot; Full internal execution evidence (agent run ledger, runtime evidence) is retained behind Operator and is not exposed here.
+    </p>
+  </div>
+</body>
+</html>

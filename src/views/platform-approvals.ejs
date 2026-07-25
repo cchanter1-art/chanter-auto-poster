@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Εγκρίσεις — CHANTER Platform</title>
+  <link rel="stylesheet" href="/platform/platform.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('_platform-nav', { active: locals.active || '' }) %>
+
+    <div class="breadcrumb"><a href="/platform">Πλατφόρμα</a> / Εγκρίσεις</div>
+    <h1 class="page-title">Εγκρίσεις</h1>
+    <p class="page-subtitle">
+      Ό,τι περιμένει άνθρωπο. Η ίδια η έγκριση δίνεται μέσα στην ενότητα, ποτέ από αυτή τη λίστα.
+      &middot; Everything waiting on a person. Approval itself is granted inside the module, never from this list.
+    </p>
+
+    <% if (workError) { %>
+      <div class="notice notice-error" data-testid="work-error">Οι εγκρίσεις δεν είναι διαθέσιμες αυτή τη στιγμή. &middot; <%= workError %></div>
+    <% } %>
+
+    <% if (items.length === 0) { %>
+      <div class="empty-state" data-testid="approvals-empty">
+        <div>Δεν εκκρεμεί καμία έγκριση.</div>
+        <div class="en">Nothing is waiting for approval.</div>
+      </div>
+    <% } else { %>
+      <div class="batch-list" data-testid="approvals-list">
+        <% items.forEach(function (item) { %>
+          <% const view = platformStatus.presentation(item.state); %>
+          <a class="batch-row" href="<%= item.href %>" data-work="<%= item.workId %>" data-state="<%= item.state %>">
+            <div>
+              <div><%= item.title %></div>
+              <div class="meta">
+                <%= item.moduleId === 'autoposter' ? 'AutoPoster' : item.moduleId %>
+                &middot; <%= item.stateReason %>
+              </div>
+            </div>
+            <div class="counts"><%= item.counts.awaiting %> προς έλεγχο &middot; to review</div>
+            <span class="chip <%= view.chip %>" title="<%= view.labelEn %>">Άνοιγμα για έλεγχο</span>
+          </a>
+        <% }); %>
+      </div>
+    <% } %>
+
+    <p class="footer-note">
+      Καμία δημοσίευση δεν προγραμματίζεται πριν εγκρίνει άνθρωπος κάθε στοιχείο μέσα στην ενότητα.
+      &middot; Nothing is scheduled until a human accepts each item inside the module.
+    </p>
+  </div>
+</body>
+</html>

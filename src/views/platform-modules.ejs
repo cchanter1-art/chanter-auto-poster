@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Ενότητες — CHANTER Platform</title>
+  <link rel="stylesheet" href="/platform/platform.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('_platform-nav', { active: locals.active || '' }) %>
+
+    <div class="breadcrumb"><a href="/platform">Πλατφόρμα</a> / Ενότητες</div>
+    <h1 class="page-title">Ενότητες</h1>
+    <p class="page-subtitle">
+      Κάθε ενότητα δηλώνει ρητά ποιος την κατέχει. &middot; Every module declares who owns it.
+    </p>
+
+    <h2 class="section-title">Διαθέσιμες σε εσάς &middot; Available to you</h2>
+    <div class="module-grid" data-testid="customer-modules">
+      <% customerModules.forEach(function (module) { %>
+        <a class="module-card" href="<%= module.href %>" data-module="<%= module.id %>" data-surface="customer">
+          <div class="module-card-head">
+            <div class="module-name"><%= module.name %></div>
+            <span class="chip chip-ready">Ενεργή</span>
+          </div>
+          <div class="module-desc"><%= module.summary %></div>
+          <div class="module-desc-en"><%= module.summaryEn %></div>
+          <div class="module-owner">Κάτοχος: <%= module.owner %></div>
+        </a>
+      <% }); %>
+    </div>
+
+    <h2 class="section-title">Εσωτερικές ενότητες &middot; Internal modules</h2>
+    <p class="section-note">
+      Λειτουργούν πίσω από το Operator. Εμφανίζονται εδώ για διαφάνεια — δεν υπάρχει κανένας χειρισμός τους από αυτή την επιφάνεια.
+      &middot; Operated behind Operator. Listed for transparency only — no control over them exists on this surface.
+    </p>
+    <div class="module-grid" data-testid="internal-modules">
+      <% internalModules.forEach(function (module) { %>
+        <div class="module-card module-card-internal" data-module="<%= module.id %>" data-surface="internal">
+          <div class="module-card-head">
+            <div class="module-name"><%= module.name %></div>
+            <span class="chip chip-neutral">Εσωτερική</span>
+          </div>
+          <div class="module-desc"><%= module.summary %></div>
+          <div class="module-desc-en"><%= module.summaryEn %></div>
+          <div class="module-owner">Κάτοχος: <%= module.owner %></div>
+        </div>
+      <% }); %>
+    </div>
+
+    <p class="footer-note">
+      Έλεγχος αποθετηρίων, commit, push, deployment και διαχείριση workers παραμένουν αποκλειστικά εσωτερικά.
+      &middot; Repository control, commit, push, deployment and worker administration remain internal only.
+    </p>
+  </div>
+</body>
+</html>
