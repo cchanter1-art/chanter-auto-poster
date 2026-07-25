@@ -357,14 +357,31 @@ textarea { resize: vertical; min-height: 64px; }
 }
 @keyframes platform-spin { to { transform: rotate(360deg); } }
 
-/* Destination multi-select (intake) */
-.destination-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
-  margin-bottom: 20px;
+/* Destination multi-select chips (intake), grouped by provider */
+.destination-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-.destination-item {
+.selected-count { color: var(--text-faint); font-size: 12.5px; white-space: nowrap; }
+.selected-count-active { color: var(--accent); }
+
+.destination-groups { display: flex; flex-direction: column; gap: 14px; margin-bottom: 10px; }
+.destination-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.destination-group-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.destination-group-head .btn { font-size: 12px; padding: 2px 8px; }
+/* Chips wrap freely so a long account list stays readable on mobile. */
+.destination-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.destination-chip {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -374,11 +391,32 @@ textarea { resize: vertical; min-height: 64px; }
   padding: 9px 12px;
   font-size: 13.5px;
   cursor: pointer;
+  max-width: 100%;
 }
-.destination-item:has(input:checked) { border-color: var(--accent); background: rgba(201, 169, 97, 0.06); }
-.destination-item input { margin: 0; }
+.destination-chip-main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.destination-chip:has(input:checked) { border-color: var(--accent); background: rgba(201, 169, 97, 0.06); }
+/* Visible keyboard focus on the chip itself, not just the native checkbox. */
+.destination-chip:has(input:focus-visible) {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.destination-chip input { margin: 0; }
+.destination-chip-disabled { opacity: 0.55; cursor: not-allowed; }
+.destination-chip-disabled .destination-chip-main { cursor: not-allowed; }
+.destination-chip-note { color: var(--text-faint); font-size: 11.5px; max-width: 260px; }
+.destination-actions { display: flex; gap: 8px; margin-bottom: 20px; }
+.destination-actions .btn { font-size: 12px; padding: 2px 8px; }
 .destination-provider { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
-.destination-label { color: var(--text); }
+.destination-label { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 
 /* Scheduling mode tabs (intake) */
 .mode-tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }

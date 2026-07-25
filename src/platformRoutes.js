@@ -15,8 +15,20 @@ const { randomUUID } = require('crypto');
 const config = require('./config');
 const applicationService = require('./autoposterApplicationService');
 const batchService = require('./batchService');
+const providers = require('./providers');
+const { groupDestinationsByProvider, countSelectableAccounts } = require('./destinationChips');
 const { requireAdminApi, requireAdminPage, resolveUserId } = require('./auth');
 const { isSupportedBatchUploadFile, BATCH_MEDIA_UPLOAD_MESSAGE } = require('./mediaPolicy');
+
+// Which connected providers can actually be selected at bulk intake. YouTube is
+// connected and publishing-ready but not choosable here: it needs a
+// human-entered per-video title that cannot exist yet at bulk intake, so it is
+// shown grouped-but-disabled and reached per item during review instead. This
+// mirrors batchService.createBatch's own YouTube guard (the hard backstop).
+function isIntakeSelectableProvider(provider) {
+  return provider !== providers.PROVIDER_YOUTUBE;
+}
+const INTAKE_UNAVAILABLE_REASON = 'YouTube requires a title for each video. Assign it during review.';
 
 const router = express.Router();
 
@@ -118,24 +130,31 @@ router.get('/platform', requireAdminPage, (req, res) => {
 
 router.get('/platform/autoposter', requireAdminPage, asyncRoute(async (req, res) => {
   const context = websiteContext(req);
-  let destinations = [];
+  let destinationGroups = [];
+  let selectableCount = 0;
   let accountsError = '';
   try {
     const resolved = await batchService.listDestinations(context);
-    // Intake only offers destinations ready to receive a fan-out draft right
-    // now, AND excludes YouTube (requires a human-entered per-item title
-    // that cannot exist yet at bulk intake — add it per item during review
-    // instead). Review's existing destination selector deliberately still
-    // shows every connected account (unchanged from V1.1).
-    destinations = resolved.destinations.filter(
-      (destination) => destination.publishingReady && destination.provider !== 'youtube'
-    );
+    // Every connected, publishing-ready account is grouped by provider and
+    // rendered as a clickable chip. Selectability (not visibility) encodes the
+    // intake rule: YouTube is shown grouped-but-disabled because it needs a
+    // human-entered per-item title that cannot exist yet at bulk intake — it
+    // stays reachable per item during review (unchanged from V1.1). The
+    // empty-state gate below keys off selectable accounts, so the form still
+    // only appears when there is at least one account to fan out to.
+    const publishingReady = resolved.destinations.filter((destination) => destination.publishingReady);
+    destinationGroups = groupDestinationsByProvider(publishingReady, {
+      isSelectable: isIntakeSelectableProvider,
+      unavailableReason: () => INTAKE_UNAVAILABLE_REASON
+    });
+    selectableCount = countSelectableAccounts(destinationGroups);
   } catch (error) {
     accountsError = error.message || 'Connected channels are unavailable right now.';
   }
   res.render('platform-autoposter', {
     appName: config.appName,
-    destinations,
+    destinationGroups,
+    selectableCount,
     accountsError,
     batchDefaults: {
       staggerMinutes: config.batchIntake.staggerDefaultMinutes,
