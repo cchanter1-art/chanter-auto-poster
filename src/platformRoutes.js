@@ -277,7 +277,13 @@ router.get('/platform/health', requireAdminPage, asyncRoute(async (req, res) => 
   });
 }));
 
-router.get('/platform/autoposter', requireAdminPage, asyncRoute(async (req, res) => {
+// The one canonical customer posting surface: Upload -> Accounts -> Caption ->
+// Schedule -> Review -> Accept. One account and many accounts are the same
+// page, the same submission path and the same validation — the number of
+// selected destinations is the only difference between them. What a package
+// changes is which capabilities inside this page are usable, never which page,
+// route, or product the customer receives.
+router.get('/platform/compose', requireAdminPage, asyncRoute(async (req, res) => {
   const context = websiteContext(req);
   let destinationGroups = [];
   let selectableCount = 0;
@@ -300,29 +306,44 @@ router.get('/platform/autoposter', requireAdminPage, asyncRoute(async (req, res)
   } catch (error) {
     accountsError = error.message || 'Connected channels are unavailable right now.';
   }
-  res.render('platform-autoposter', {
+  // Resolved through the same seam the write path enforces with, so the page
+  // can never offer a capability the API would refuse.
+  const capabilities = await batchService.getComposerCapabilities(context);
+  res.render('platform-compose', {
     appName: config.appName,
-    active: 'modules',
+    active: 'compose',
     destinationGroups,
     selectableCount,
     accountsError,
-    batchDefaults: {
-      staggerMinutes: config.batchIntake.staggerDefaultMinutes,
-      staggerMin: config.batchIntake.staggerMinMinutes,
-      staggerMax: config.batchIntake.staggerMaxMinutes,
-      maxItems: config.batchIntake.maxItems,
-      maxDestinations: batchService.MAX_DESTINATIONS
+    capabilities,
+    composeDefaults: {
+      maxItems: capabilities.maxItemsPerDraft,
+      safetyBufferMinutes: config.batchIntake.safetyBufferMinutes
     }
   });
 }));
 
-router.get('/platform/autoposter/batches/:batchId', requireAdminPage, (req, res) => {
+// Review + Accept: steps 5 and 6 of the same canonical flow. The human
+// approval gate lives here, on the durable record, exactly as before.
+router.get('/platform/compose/:batchId', requireAdminPage, (req, res) => {
   res.render('platform-batch', {
     appName: config.appName,
-    active: 'work',
+    active: 'compose',
     batchId: String(req.params.batchId || '').trim(),
     safetyBufferMinutes: config.batchIntake.safetyBufferMinutes
   });
+});
+
+// ── Legacy compatibility ───────────────────────────────────────────────────
+// The former bulk-only module route and its review path. Thin redirects, no
+// second implementation, absent from the primary navigation. Saved links keep
+// working and land on the canonical composer instead of a dead end.
+router.get('/platform/autoposter', requireAdminPage, (req, res) => {
+  res.redirect(302, '/platform/compose');
+});
+
+router.get('/platform/autoposter/batches/:batchId', requireAdminPage, (req, res) => {
+  res.redirect(302, `/platform/compose/${encodeURIComponent(String(req.params.batchId || '').trim())}`);
 });
 
 // ── Shell APIs (admin session, JSON, read-only) ────────────────────────────
@@ -383,6 +404,12 @@ router.post('/api/platform/batches', requireAdminApi, uploadBatchMedia, asyncRou
     const result = await batchService.createBatch(websiteContext(req), {
       files,
       destinations: parseJsonArray(req.body.destinations),
+      // One main caption and hashtag set, inherited by every selected
+      // destination. Left blank, per-item AI preparation fills them in as
+      // before — this only stops the composer's caption step from being
+      // discarded on the way to the service that already accepted it.
+      caption: req.body.caption,
+      hashtags: req.body.hashtags,
       scheduleMode: req.body.scheduleMode,
       startDate: req.body.startDate,
       startTime: req.body.startTime,

@@ -87,7 +87,7 @@ function projectAutoPosterBatch(record = {}) {
     // The Approvals surface keys off this alone, so approval never appears for
     // work that has nothing left for a human to accept.
     needsApproval: state === WORK_STATE.WAITING_APPROVAL && awaiting > 0,
-    href: batchId ? `/platform/autoposter/batches/${encodeURIComponent(batchId)}` : '',
+    href: batchId ? `/platform/compose/${encodeURIComponent(batchId)}` : '',
     createdAt: String(record.createdAt || ''),
     updatedAt: String(record.updatedAt || record.createdAt || ''),
     // Every batch carries a durable record, so every batch is indexable on the

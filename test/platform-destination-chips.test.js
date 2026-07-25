@@ -29,7 +29,22 @@ const {
 const { createBatchService } = require('../src/batchService');
 const { groupDestinationsByProvider, countSelectableAccounts } = require('../src/destinationChips');
 
-const intakeViewPath = path.join(__dirname, '..', 'src', 'views', 'platform-autoposter.ejs');
+// The Accounts step of the canonical composer. The chips moved here when the
+// separate bulk-intake page collapsed into one posting workflow; every
+// behaviour this layer guards is re-proven against the surface that replaced it.
+const intakeViewPath = path.join(__dirname, '..', 'src', 'views', 'platform-compose.ejs');
+
+const FULL_CAPABILITIES = {
+  resolved: true,
+  reason: '',
+  planId: 'legacy_full_access',
+  maxDestinationsPerPost: 10,
+  multiAccountPosting: true,
+  perAccountOverrides: true,
+  maxItemsPerDraft: 30,
+  advancedScheduling: true,
+  schedulingHorizonDays: null
+};
 
 // The three accounts named in the task brief.
 const CONNECTED = [
@@ -114,9 +129,8 @@ function renderIntake(overrides = {}) {
       ? overrides.selectableCount
       : countSelectableAccounts(groups),
     accountsError: overrides.accountsError || '',
-    batchDefaults: {
-      staggerMinutes: 30, staggerMin: 5, staggerMax: 1440, maxItems: 30, maxDestinations: 10
-    }
+    capabilities: { ...FULL_CAPABILITIES, ...(overrides.capabilities || {}) },
+    composeDefaults: { maxItems: 30, safetyBufferMinutes: 10 }
   }, { filename: intakeViewPath });
 }
 
@@ -179,7 +193,7 @@ test('the page shows a compact selected-account count and a clear-selection cont
   assert.ok(html.includes('id="clear-destinations"'), 'clear-selection control present');
   assert.equal(selectAllButtons(html).length, 1, 'select-all offered for a multi-account provider');
   // The count is recomputed from the live selection on every update.
-  assert.match(html, /selectedCountEl\.textContent = destCount === 0/);
+  assert.match(html, /selectedCountEl\.textContent = destinations\.length === 0/);
 });
 
 // The bare class name also appears in the page script's querySelectorAll, so
@@ -197,59 +211,58 @@ test('select-all renders only for a selectable provider holding more than one ac
   assert.ok(buttons[0].includes('data-provider="tiktok"'));
 });
 
-test('empty selection blocks submission with an operator-visible message', () => {
+test('empty selection blocks submission and the review step names what is missing', () => {
   const html = renderIntake();
-  // The submit button starts disabled and stays disabled while nothing is chosen.
-  assert.match(html, /submitBtn\.disabled = sourceCount === 0 \|\| destCount === 0/);
+  // The submit button starts disabled and only enables once every step is done —
+  // an empty account selection is one of the steps that cannot be satisfied.
+  assert.match(html, /submitBtn\.disabled = !ready/);
   assert.match(html, /id="submit-btn" type="submit" class="btn btn-primary" disabled/);
-  // …and a keyboard submit with an empty selection explains itself.
-  assert.match(html, /Select at least one destination before creating the batch/);
+  assert.match(html, /accountsOk = setStep\('accounts', destinations\.length > 0/);
+  // …and the Review step says which step is unsatisfied rather than failing mutely.
+  assert.match(html, /'Επιλέξτε λογαριασμό'/);
+  // Belt and braces: a keyboard submit with an empty selection cannot post.
+  assert.match(html, /if \(selectedFiles\.length === 0 \|\| destinations\.length === 0\) return;/);
 });
 
 test('the form only appears when at least one account is actually selectable', () => {
   const youtubeOnly = renderIntake({ destinationGroups: groupAll([CONNECTED[2]]) });
-  assert.ok(!youtubeOnly.includes('id="batch-form"'), 'no intake form without a selectable destination');
+  assert.ok(!youtubeOnly.includes('id="compose-form"'), 'no composer form without a selectable destination');
   assert.match(youtubeOnly, /No connected, publishing-ready account/);
 
-  assert.ok(renderIntake().includes('id="batch-form"'), 'the form appears when TikTok is selectable');
+  assert.ok(renderIntake().includes('id="compose-form"'), 'the form appears when TikTok is selectable');
 });
 
 test('destination-chip copy is English-only', () => {
   const html = renderIntake();
 
-  // The exact product strings for this control.
+  // The exact product strings for this control, carried over unchanged when the
+  // chips moved into the canonical composer's Accounts step.
   for (const copy of [
-    '>Destinations<',
     'data-none="No accounts selected"',
     '>Select all<',
     '>Clear selection<',
     "'1 account selected'",
-    "destCount + ' accounts selected'",
-    'Select at least one destination before creating the batch.',
+    "destinations.length + ' accounts selected'",
     'YouTube requires a title for each video. Assign it during review.',
-    'Up to ' // + maxDestinations + ' destinations per batch.'
+    'Up to ' // + CAP.maxDestinationsPerPost + ' destinations per post.'
   ]) {
     assert.ok(html.includes(copy), `destination-chip copy must include ${copy}`);
   }
 
-  // No Greek anywhere in the chip control markup. The per-destination sound
-  // <select> is deliberately excluded: it is pre-existing legacy sound-mode
-  // copy that this task only relocated, not chip copy this task introduced.
-  const start = html.indexOf('<div class="destination-head">');
+  // No Greek anywhere in the chip control markup itself.
+  const start = html.indexOf('<div id="destination-list"');
   const end = html.indexOf('</div>', html.indexOf('<div class="destination-actions">'));
   assert.ok(start >= 0 && end > start, 'chip region must be locatable');
-  const chipRegion = html.slice(start, end).replace(/<select class="destination-sound"[\s\S]*?<\/select>/g, '');
-  const greek = chipRegion.match(/[Ͱ-Ͽ]+/g);
+  const greek = html.slice(start, end).match(/[Ͱ-Ͽ]+/g);
   assert.equal(greek, null, `chip control copy must be English-only, found: ${greek}`);
 
-  // The count and validation strings live in the page script, not the markup.
+  // The count and limit strings live in the page script, not the markup.
   const script = html.slice(html.indexOf('<script>'));
   const countAndValidation = [
     /selectedCountEl\.dataset\.none/,
     /'1 account selected'/,
-    /destCount \+ ' accounts selected'/,
-    /showNotice\('Select at least one destination before creating the batch\.', 'error'\)/,
-    /showNotice\('Up to ' \+ maxDestinations \+ ' destinations per batch\.', 'error'\)/
+    /destinations\.length \+ ' accounts selected'/,
+    /showNotice\('Up to ' \+ CAP\.maxDestinationsPerPost \+ ' destinations per post\.', 'error'\)/
   ];
   for (const pattern of countAndValidation) {
     assert.match(script, pattern, `script copy must match ${pattern}`);
@@ -260,10 +273,12 @@ test('the chip selection is submitted through the existing destinations contract
   const html = renderIntake();
   // Selection is read off the chips, keeps per-destination sound mode, and is
   // posted as the same JSON `destinations` field the fan-out already consumes.
-  assert.match(html, /var row = box\.closest\('\.destination-chip'\)/);
   assert.match(html, /provider: box\.dataset\.provider/);
-  assert.match(html, /accountId: box\.dataset\.accountId/);
-  assert.match(html, /soundMode: soundSelect \? soundSelect\.value : 'keep_original'/);
+  assert.match(html, /accountId: accountId/);
+  // Sound inherits the one shared value unless an entitled per-account override
+  // is actually in force.
+  assert.match(html, /usingOverrides && override && override\.soundMode/);
+  assert.match(html, /: sharedSound\.value/);
   assert.match(html, /data\.append\('destinations', JSON\.stringify\(destinations\)\)/);
   assert.match(html, /fetch\('\/api\/platform\/batches', \{ method: 'POST'/);
 });

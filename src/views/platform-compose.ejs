@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Compose — CHANTER Platform</title>
+  <link rel="stylesheet" href="/platform/platform.css">
+</head>
+<body>
+  <div class="shell">
+    <%- include('_platform-nav', { active: locals.active || '' }) %>
+
+    <div class="breadcrumb"><a href="/platform">Platform</a> / Σύνθεση</div>
+    <h1 class="page-title">Σύνθεση δημοσίευσης &middot; <span class="en-title">Compose</span></h1>
+
+    <div id="notice" class="notice hidden"></div>
+
+    <% if (selectableCount === 0) { %>
+      <div class="empty-state">
+        <div>Δεν υπάρχει συνδεδεμένος λογαριασμός έτοιμος για δημοσίευση.</div>
+        <div class="en">No connected, publishing-ready account. Connect one from the <a href="/private/autoposter">classic console</a> to begin.</div>
+        <% if (accountsError) { %><div class="en"><%= accountsError %></div><% } %>
+      </div>
+    <% } else { %>
+      <ol class="step-rail" id="step-rail">
+        <li class="step" data-step="upload"><span class="step-mark">1</span><span class="step-label">Αρχεία</span></li>
+        <li class="step" data-step="accounts"><span class="step-mark">2</span><span class="step-label">Λογαριασμοί</span></li>
+        <li class="step" data-step="caption"><span class="step-mark">3</span><span class="step-label">Λεζάντα</span></li>
+        <li class="step" data-step="schedule"><span class="step-mark">4</span><span class="step-label">Χρόνος</span></li>
+        <li class="step" data-step="review"><span class="step-mark">5</span><span class="step-label">Έλεγχος</span></li>
+      </ol>
+
+      <div class="panel">
+        <form id="compose-form">
+          <!-- 1 · Upload -->
+          <section class="compose-step" data-section="upload">
+            <div class="compose-step-head">
+              <h3 class="section-title">1 &middot; Αρχεία</h3>
+              <span class="step-state" data-state-for="upload"></span>
+            </div>
+            <div id="dropzone" class="dropzone">
+              <div class="dz-primary">Σύρετε βίντεο ή εικόνες εδώ</div>
+              <div class="dz-secondary">MP4, MOV, WebM, JPG, PNG, WebP &middot; έως <%= composeDefaults.maxItems %> αρχεία &middot; 250MB το καθένα</div>
+              <input id="file-input" type="file" name="videos" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple style="display:none">
+            </div>
+            <ul id="file-list" class="file-list"></ul>
+          </section>
+
+          <!-- 2 · Accounts -->
+          <section class="compose-step" data-section="accounts">
+            <div class="compose-step-head">
+              <h3 class="section-title">2 &middot; Λογαριασμοί</h3>
+              <span class="step-state" data-state-for="accounts"></span>
+            </div>
+            <% if (!capabilities.multiAccountPosting) { %>
+              <p class="lock-line">Multiple accounts<span class="lock-reason">Locked by your package</span></p>
+            <% } %>
+            <div id="destination-list" class="destination-groups">
+              <% for (const group of destinationGroups) { %>
+                <section class="destination-group" data-provider="<%= group.provider %>">
+                  <div class="destination-group-head">
+                    <h4 class="destination-group-title"><%= group.providerDisplayName %></h4>
+                    <% if (capabilities.multiAccountPosting && group.selectable && group.accounts.length > 1) { %>
+                      <button type="button" class="btn btn-quiet select-all-provider" data-provider="<%= group.provider %>">Select all</button>
+                    <% } %>
+                  </div>
+                  <div class="destination-chip-row">
+                    <% for (const account of group.accounts) { %>
+                      <div class="destination-chip<%= account.selectable ? '' : ' destination-chip-disabled' %>">
+                        <label class="destination-chip-main">
+                          <input type="<%= capabilities.multiAccountPosting ? 'checkbox' : 'radio' %>"
+                                 name="destination" class="destination-checkbox"
+                                 value="<%= account.provider %>|<%= account.accountId %>"
+                                 data-provider="<%= account.provider %>" data-account-id="<%= account.accountId %>"
+                                 <% if (!account.selectable) { %>disabled aria-disabled="true"<% } %>>
+                          <span class="destination-provider"><%= account.providerDisplayName %></span>
+                          <span class="destination-label"><%= account.label %></span>
+                        </label>
+                        <% if (!account.selectable && account.unavailableReason) { %>
+                          <span class="destination-chip-note"><%= account.unavailableReason %></span>
+                        <% } %>
+                      </div>
+                    <% } %>
+                  </div>
+                </section>
+              <% } %>
+            </div>
+            <div class="destination-actions">
+              <span id="selected-count" class="selected-count" aria-live="polite" data-none="No accounts selected"></span>
+              <button type="button" id="clear-destinations" class="btn btn-quiet">Clear selection</button>
+            </div>
+          </section>
+
+          <!-- 3 · Caption -->
+          <section class="compose-step" data-section="caption">
+            <div class="compose-step-head">
+              <h3 class="section-title">3 &middot; Λεζάντα</h3>
+              <span class="step-state" data-state-for="caption"></span>
+            </div>
+            <div class="form-row">
+              <div>
+                <label class="field-label" for="caption">Λεζάντα &middot; Caption</label>
+                <textarea id="caption" rows="3" placeholder="Αφήστε το κενό για αυτόματη προετοιμασία"></textarea>
+              </div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label class="field-label" for="hashtags">Hashtags</label>
+                <input id="hashtags" type="text" placeholder="#chanter #viral">
+              </div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label class="field-label" for="shared-sound">Ήχος &middot; Sound</label>
+                <select id="shared-sound">
+                  <option value="keep_original">Αρχικός &middot; Original</option>
+                  <option value="mute">Χωρίς ήχο &middot; Muted</option>
+                  <option value="tiktok_recommended">Ήχος TikTok &middot; TikTok sound</option>
+                </select>
+              </div>
+            </div>
+            <% if (capabilities.perAccountOverrides) { %>
+              <label class="toggle-row hidden" id="per-account-toggle-row">
+                <input type="checkbox" id="per-account-toggle">
+                <span>Διαφοροποίηση ανά λογαριασμό &middot; Per-account variation</span>
+              </label>
+              <div id="per-account-panel" class="per-account-panel hidden">
+                <p class="section-note">Όσα δεν αλλάξετε κληρονομούν την κύρια λεζάντα. &middot; Anything left blank inherits the main caption.</p>
+                <div id="per-account-rows"></div>
+              </div>
+            <% } else { %>
+              <p class="lock-line hidden" id="per-account-locked">Διαφοροποίηση ανά λογαριασμό<span class="lock-reason">Κλειδωμένο από το πακέτο σας &middot; Locked by your package</span></p>
+            <% } %>
+            <p id="sound-note" class="section-note hidden" style="color:var(--accent)">
+              Ο «Ήχος TikTok» απαιτεί χειροκίνητη ολοκλήρωση στην εφαρμογή TikTok. &middot; “TikTok sound” needs manual completion in the TikTok app.
+            </p>
+          </section>
+
+          <!-- 4 · Schedule -->
+          <section class="compose-step" data-section="schedule">
+            <div class="compose-step-head">
+              <h3 class="section-title">4 &middot; Χρόνος</h3>
+              <span class="step-state" data-state-for="schedule"></span>
+            </div>
+            <label class="toggle-row">
+              <input type="radio" name="when" value="soonest" checked>
+              <span>Συντομότερα &middot; Earliest safe slot</span>
+            </label>
+            <label class="toggle-row">
+              <input type="radio" name="when" value="at">
+              <span>Προγραμματισμός &middot; Schedule</span>
+            </label>
+            <div class="form-row cols-2 hidden" id="schedule-at">
+              <div>
+                <label class="field-label" for="startDate">Ημερομηνία</label>
+                <input id="startDate" type="date">
+              </div>
+              <div>
+                <label class="field-label" for="startTime">Ώρα</label>
+                <input id="startTime" type="time">
+              </div>
+            </div>
+            <% if (capabilities.advancedScheduling) { %>
+              <details id="advanced-schedule" class="advanced-schedule hidden">
+                <summary>Κατανομή σε ημέρες &middot; Spread across days</summary>
+                <div class="mode-tabs" id="mode-tabs">
+                  <button type="button" class="mode-tab active" data-mode="interval">Σειριακά</button>
+                  <button type="button" class="mode-tab" data-mode="dateRange">Εύρος ημερών</button>
+                  <button type="button" class="mode-tab" data-mode="dailySlots">Ώρες ημέρας</button>
+                </div>
+                <div class="mode-panel hidden" data-mode-panel="dateRange">
+                  <div class="form-row cols-3">
+                    <div>
+                      <label class="field-label" for="lastDay">Τελευταία ημέρα</label>
+                      <input id="lastDay" type="date">
+                    </div>
+                    <div>
+                      <label class="field-label" for="postsPerDay">Ανά ημέρα</label>
+                      <input id="postsPerDay" type="number" min="1" max="20" value="1">
+                    </div>
+                    <div>
+                      <label class="field-label" for="dailyEndTime">Έως (προαιρετικό)</label>
+                      <input id="dailyEndTime" type="time">
+                    </div>
+                  </div>
+                </div>
+                <div class="mode-panel hidden" data-mode-panel="dailySlots">
+                  <div class="form-row cols-2">
+                    <div>
+                      <label class="field-label" for="slotsLastDay">Τελευταία ημέρα</label>
+                      <input id="slotsLastDay" type="date">
+                    </div>
+                    <div></div>
+                  </div>
+                  <label class="field-label">Ώρες ανά ημέρα</label>
+                  <div id="daily-slot-list" class="slot-list"></div>
+                  <button type="button" id="add-slot-btn" class="btn btn-quiet">+ Ώρα</button>
+                </div>
+              </details>
+            <% } %>
+          </section>
+
+          <!-- 5 · Review -->
+          <section class="compose-step" data-section="review">
+            <div class="compose-step-head">
+              <h3 class="section-title">5 &middot; Έλεγχος</h3>
+              <span class="step-state" data-state-for="review"></span>
+            </div>
+            <ul id="review-list" class="review-list" aria-live="polite"></ul>
+            <button id="submit-btn" type="submit" class="btn btn-primary" disabled>Προγραμματισμός</button>
+            <span id="submit-status" class="item-note" style="margin-left:12px"></span>
+            <p class="section-note">Όλα δημιουργούνται ως προσχέδια. Τίποτα δεν δημοσιεύεται χωρίς τη δική σας έγκριση. &middot; Everything is a draft; nothing publishes without your approval.</p>
+          </section>
+        </form>
+      </div>
+    <% } %>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var form = document.getElementById('compose-form');
+      if (!form) return;
+
+      // Capabilities resolved server-side by the one canonical policy seam
+      // (src/composerPolicy.js). This mirrors them for presentation only — the
+      // API re-checks every one of them at submit time.
+      var CAP = <%- JSON.stringify({
+        maxDestinationsPerPost: capabilities.maxDestinationsPerPost,
+        multiAccountPosting: capabilities.multiAccountPosting,
+        perAccountOverrides: capabilities.perAccountOverrides,
+        maxItemsPerDraft: capabilities.maxItemsPerDraft,
+        advancedScheduling: capabilities.advancedScheduling
+      }) %>;
+      var SAFETY_BUFFER_MINUTES = <%= composeDefaults.safetyBufferMinutes %>;
+
+      var dropzone = document.getElementById('dropzone');
+      var fileInput = document.getElementById('file-input');
+      var fileList = document.getElementById('file-list');
+      var submitBtn = document.getElementById('submit-btn');
+      var submitStatus = document.getElementById('submit-status');
+      var selectedCountEl = document.getElementById('selected-count');
+      var reviewList = document.getElementById('review-list');
+      var soundNote = document.getElementById('sound-note');
+      var sharedSound = document.getElementById('shared-sound');
+      var captionEl = document.getElementById('caption');
+      var hashtagsEl = document.getElementById('hashtags');
+      var perAccountToggle = document.getElementById('per-account-toggle');
+      var perAccountToggleRow = document.getElementById('per-account-toggle-row');
+      var perAccountPanel = document.getElementById('per-account-panel');
+      var perAccountRows = document.getElementById('per-account-rows');
+      var perAccountLocked = document.getElementById('per-account-locked');
+      var advanced = document.getElementById('advanced-schedule');
+      var scheduleAt = document.getElementById('schedule-at');
+      var selectedFiles = [];
+      var currentMode = 'interval';
+      var overrides = {};
+
+      function showNotice(message, kind) {
+        var el = document.getElementById('notice');
+        el.textContent = message;
+        el.className = 'notice ' + (kind === 'error' ? 'notice-error' : 'notice-ok');
+      }
+
+      function pad(value) { return (value < 10 ? '0' : '') + value; }
+      function localDate(date) {
+        return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate());
+      }
+      function localTime(date) { return pad(date.getHours()) + ':' + pad(date.getMinutes()); }
+
+      // The earliest slot acceptance can safely keep in the future, expressed in
+      // the user's own local time. The server re-validates it regardless.
+      function earliestSafeBase() {
+        return new Date(Date.now() + (SAFETY_BUFFER_MINUTES + 2) * 60000);
+      }
+
+      var tomorrow = new Date(Date.now() + 86400000);
+      document.getElementById('startDate').value = localDate(tomorrow);
+      document.getElementById('startTime').value = '10:00';
+      if (advanced) {
+        document.getElementById('lastDay').value = localDate(tomorrow);
+        document.getElementById('slotsLastDay').value = localDate(tomorrow);
+      }
+
+      // ── 1 · Files ──
+      function refreshFileList() {
+        fileList.innerHTML = '';
+        selectedFiles.forEach(function (file, index) {
+          var li = document.createElement('li');
+          li.innerHTML = '<span></span><span class="size">' + (file.size / 1048576).toFixed(1) + ' MB</span>';
+          li.firstChild.textContent = file.name;
+          var remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'btn btn-quiet';
+          remove.textContent = '✕';
+          remove.addEventListener('click', function () {
+            selectedFiles.splice(index, 1);
+            refreshFileList();
+          });
+          li.appendChild(remove);
+          fileList.appendChild(li);
+        });
+        update();
+      }
+      function addFiles(files) {
+        Array.prototype.slice.call(files).forEach(function (file) {
+          if (selectedFiles.length >= CAP.maxItemsPerDraft) return;
+          selectedFiles.push(file);
+        });
+        refreshFileList();
+      }
+      dropzone.addEventListener('click', function () { fileInput.click(); });
+      fileInput.addEventListener('change', function () { addFiles(fileInput.files); fileInput.value = ''; });
+      dropzone.addEventListener('dragover', function (event) { event.preventDefault(); dropzone.classList.add('dragover'); });
+      dropzone.addEventListener('dragleave', function () { dropzone.classList.remove('dragover'); });
+      dropzone.addEventListener('drop', function (event) {
+        event.preventDefault();
+        dropzone.classList.remove('dragover');
+        if (event.dataTransfer && event.dataTransfer.files) addFiles(event.dataTransfer.files);
+      });
+
+      // ── 2 · Accounts ──
+      // One selection control for one account and for many. When the package
+      // locks multi-account posting the same control renders as a radio, so the
+      // step never becomes a different product.
+      var boxes = Array.prototype.slice.call(document.querySelectorAll('.destination-checkbox'))
+        .filter(function (box) { return !box.disabled; });
+
+      function selectedBoxes() {
+        return boxes.filter(function (box) { return box.checked; });
+      }
+      function selectedDestinations() {
+        return selectedBoxes().map(function (box) {
+          var accountId = box.dataset.accountId;
+          var override = overrides[accountId];
+          var usingOverrides = CAP.perAccountOverrides && perAccountToggle && perAccountToggle.checked;
+          return {
+            provider: box.dataset.provider,
+            accountId: accountId,
+            soundMode: usingOverrides && override && override.soundMode
+              ? override.soundMode
+              : sharedSound.value
+          };
+        });
+      }
+
+      boxes.forEach(function (box) {
+        box.addEventListener('change', function () {
+          if (box.checked && selectedBoxes().length > CAP.maxDestinationsPerPost) {
+            box.checked = false;
+            showNotice(CAP.multiAccountPosting
+              ? 'Up to ' + CAP.maxDestinationsPerPost + ' destinations per post.'
+              : 'Multiple accounts are locked by your package.', 'error');
+          }
+          update();
+        });
+      });
+      Array.prototype.slice.call(document.querySelectorAll('.select-all-provider')).forEach(function (button) {
+        button.addEventListener('click', function () {
+          var reached = false;
+          boxes.forEach(function (box) {
+            if (box.dataset.provider !== button.dataset.provider || box.checked) return;
+            if (selectedBoxes().length >= CAP.maxDestinationsPerPost) { reached = true; return; }
+            box.checked = true;
+          });
+          if (reached) showNotice('Up to ' + CAP.maxDestinationsPerPost + ' destinations per post.', 'error');
+          update();
+        });
+      });
+      document.getElementById('clear-destinations').addEventListener('click', function () {
+        boxes.forEach(function (box) { box.checked = false; });
+        update();
+      });
+
+      // Default safely when exactly one valid account exists.
+      if (boxes.length === 1) boxes[0].checked = true;
+
+      // ── 3 · Caption ──
+      sharedSound.addEventListener('change', update);
+      captionEl.addEventListener('input', update);
+      if (perAccountToggle) {
+        perAccountToggle.addEventListener('change', function () {
+          perAccountPanel.classList.toggle('hidden', !perAccountToggle.checked);
+          renderOverrideRows();
+          update();
+        });
+      }
+
+      // Only the SELECTED accounts get an override row, and only the fields that
+      // actually vary — never a duplicate of the whole caption form.
+      function renderOverrideRows() {
+        if (!perAccountRows || !perAccountToggle || !perAccountToggle.checked) return;
+        perAccountRows.innerHTML = '';
+        selectedBoxes().forEach(function (box) {
+          var accountId = box.dataset.accountId;
+          var label = box.parentNode.querySelector('.destination-label');
+          var row = document.createElement('div');
+          row.className = 'per-account-row';
+          var name = document.createElement('span');
+          name.className = 'per-account-name';
+          name.textContent = label ? label.textContent : accountId;
+          var select = document.createElement('select');
+          [['', 'Κληρονομεί · Inherit'], ['keep_original', 'Αρχικός'], ['mute', 'Χωρίς ήχο'], ['tiktok_recommended', 'Ήχος TikTok']]
+            .forEach(function (pair) {
+              var option = document.createElement('option');
+              option.value = pair[0];
+              option.textContent = pair[1];
+              select.appendChild(option);
+            });
+          select.value = (overrides[accountId] && overrides[accountId].soundMode) || '';
+          select.addEventListener('change', function () {
+            overrides[accountId] = overrides[accountId] || {};
+            overrides[accountId].soundMode = select.value;
+            update();
+          });
+          row.appendChild(name);
+          row.appendChild(select);
+          perAccountRows.appendChild(row);
+        });
+      }
+
+      // ── 4 · Schedule ──
+      Array.prototype.slice.call(document.querySelectorAll('input[name="when"]')).forEach(function (radio) {
+        radio.addEventListener('change', function () {
+          scheduleAt.classList.toggle('hidden', currentWhen() !== 'at');
+          update();
+        });
+      });
+      function currentWhen() {
+        var checked = document.querySelector('input[name="when"]:checked');
+        return checked ? checked.value : 'soonest';
+      }
+      if (advanced) {
+        Array.prototype.slice.call(document.querySelectorAll('.mode-tab')).forEach(function (tab) {
+          tab.addEventListener('click', function () {
+            currentMode = tab.dataset.mode;
+            Array.prototype.slice.call(document.querySelectorAll('.mode-tab')).forEach(function (other) {
+              other.classList.toggle('active', other === tab);
+            });
+            Array.prototype.slice.call(document.querySelectorAll('.mode-panel')).forEach(function (panel) {
+              panel.classList.toggle('hidden', panel.dataset.modePanel !== currentMode);
+            });
+            update();
+          });
+        });
+        var slotList = document.getElementById('daily-slot-list');
+        function addSlotRow(value) {
+          var row = document.createElement('div');
+          row.className = 'slot-row';
+          row.innerHTML = '<input type="time" class="slot-time" value="' + (value || '10:00') + '">' +
+            '<button type="button" class="btn btn-quiet slot-remove">✕</button>';
+          row.querySelector('.slot-time').addEventListener('input', update);
+          row.querySelector('.slot-remove').addEventListener('click', function () {
+            if (slotList.children.length <= 1) return;
+            row.remove();
+            update();
+          });
+          slotList.appendChild(row);
+        }
+        addSlotRow('10:00');
+        document.getElementById('add-slot-btn').addEventListener('click', function () { addSlotRow(); update(); });
+      }
+      function dailySlotValues() {
+        if (!advanced) return [];
+        return Array.prototype.slice.call(document.querySelectorAll('.slot-time'))
+          .map(function (input) { return input.value; })
+          .filter(function (value) { return /^\d{2}:\d{2}$/.test(value); });
+      }
+
+      // ── 5 · Review ──
+      function scheduleSummary() {
+        if (advanced && advanced.open && currentMode === 'dateRange') return 'Κατανομή σε ημέρες';
+        if (advanced && advanced.open && currentMode === 'dailySlots') return 'Καθορισμένες ώρες';
+        if (currentWhen() === 'soonest') {
+          var base = earliestSafeBase();
+          return 'Συντομότερα · ' + localTime(base);
+        }
+        var date = document.getElementById('startDate').value;
+        var time = document.getElementById('startTime').value;
+        return date && time ? (date + ' ' + time) : '';
+      }
+
+      function setStep(step, done, text) {
+        var rail = document.querySelector('.step[data-step="' + step + '"]');
+        if (rail) rail.classList.toggle('step-done', done);
+        var state = document.querySelector('[data-state-for="' + step + '"]');
+        if (state) {
+          state.textContent = text || '';
+          state.classList.toggle('step-state-done', done);
+        }
+        return done;
+      }
+
+      function update() {
+        var files = selectedFiles.length;
+        var destinations = selectedDestinations();
+        var when = scheduleSummary();
+
+        if (selectedCountEl) {
+          selectedCountEl.textContent = destinations.length === 0
+            ? selectedCountEl.dataset.none
+            : (destinations.length === 1 ? '1 account selected' : destinations.length + ' accounts selected');
+          selectedCountEl.classList.toggle('selected-count-active', destinations.length > 0);
+        }
+
+        // Per-account variation is only meaningful past one destination, and the
+        // locked line only earns its space once the user could have used it.
+        if (perAccountToggleRow) perAccountToggleRow.classList.toggle('hidden', destinations.length < 2);
+        if (perAccountLocked) perAccountLocked.classList.toggle('hidden', destinations.length < 2);
+        if (perAccountToggle && perAccountToggle.checked) renderOverrideRows();
+        if (advanced) advanced.classList.toggle('hidden', files < 2);
+
+        if (soundNote) {
+          soundNote.classList.toggle('hidden', !destinations.some(function (dest) {
+            return dest.soundMode === 'tiktok_recommended';
+          }));
+        }
+
+        var uploadOk = setStep('upload', files > 0, files > 0 ? files + ' αρχεία' : '');
+        var accountsOk = setStep('accounts', destinations.length > 0,
+          destinations.length > 0 ? String(destinations.length) : '');
+        var captionOk = setStep('caption', true,
+          captionEl.value.trim() ? 'Καθορισμένη' : 'Αυτόματη');
+        var scheduleOk = setStep('schedule', Boolean(when), when);
+        var ready = uploadOk && accountsOk && captionOk && scheduleOk;
+        setStep('review', ready, ready ? 'Έτοιμο' : '');
+
+        reviewList.innerHTML = '';
+        [
+          [uploadOk, files ? files + (files === 1 ? ' αρχείο' : ' αρχεία') : 'Προσθέστε αρχεία'],
+          [accountsOk, destinations.length
+            ? destinations.length + (destinations.length === 1 ? ' λογαριασμός' : ' λογαριασμοί')
+            : 'Επιλέξτε λογαριασμό'],
+          [captionOk, captionEl.value.trim() ? 'Λεζάντα έτοιμη' : 'Λεζάντα: αυτόματη προετοιμασία'],
+          [scheduleOk, when || 'Ορίστε χρόνο'],
+          [ready, ready ? 'Έτοιμο' : 'Δεν είναι έτοιμο']
+        ].forEach(function (entry) {
+          var li = document.createElement('li');
+          li.className = entry[0] ? 'review-ok' : 'review-todo';
+          li.textContent = (entry[0] ? '✔ ' : '· ') + entry[1];
+          reviewList.appendChild(li);
+        });
+
+        submitBtn.disabled = !ready;
+      }
+      update();
+
+      // ── 6 · Accept ──
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var destinations = selectedDestinations();
+        if (selectedFiles.length === 0 || destinations.length === 0) return;
+        submitBtn.disabled = true;
+        submitStatus.innerHTML = '<span class="spin"></span> Μεταφόρτωση…';
+
+        var data = new FormData();
+        selectedFiles.forEach(function (file) { data.append('videos', file); });
+        data.append('destinations', JSON.stringify(destinations));
+        data.append('caption', captionEl.value);
+        data.append('hashtags', hashtagsEl.value);
+        data.append('timezoneName', (Intl.DateTimeFormat().resolvedOptions().timeZone || ''));
+        data.append('timezoneOffsetMinutes', String(new Date().getTimezoneOffset()));
+        data.append('intakeKey', (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
+
+        var usingAdvanced = advanced && advanced.open && currentMode !== 'interval';
+        if (usingAdvanced && currentMode === 'dateRange') {
+          data.append('scheduleMode', 'dateRange');
+          data.append('firstDay', localDate(earliestSafeBase()));
+          data.append('lastDay', document.getElementById('lastDay').value);
+          data.append('postsPerDay', document.getElementById('postsPerDay').value);
+          data.append('dailyStartTime', currentWhen() === 'at'
+            ? document.getElementById('startTime').value
+            : localTime(earliestSafeBase()));
+          data.append('dailyEndTime', document.getElementById('dailyEndTime').value);
+        } else if (usingAdvanced && currentMode === 'dailySlots') {
+          data.append('scheduleMode', 'dailySlots');
+          data.append('firstDay', localDate(earliestSafeBase()));
+          data.append('lastDay', document.getElementById('slotsLastDay').value);
+          data.append('dailySlots', JSON.stringify(dailySlotValues()));
+        } else {
+          // The one default path: ONE base time. Spacing between releases is the
+          // server's business (config.batchIntake.staggerDefaultMinutes) and is
+          // never asked of the user.
+          var base = currentWhen() === 'soonest' ? earliestSafeBase() : null;
+          data.append('scheduleMode', 'interval');
+          data.append('startDate', base ? localDate(base) : document.getElementById('startDate').value);
+          data.append('startTime', base ? localTime(base) : document.getElementById('startTime').value);
+        }
+
+        fetch('/api/platform/batches', { method: 'POST', body: data, headers: { 'Accept': 'application/json' } })
+          .then(function (response) { return response.json(); })
+          .then(function (payload) {
+            if (payload && payload.ok && payload.batch) {
+              window.location.href = '/platform/compose/' + encodeURIComponent(payload.batch.batchId);
+              return;
+            }
+            submitBtn.disabled = false;
+            submitStatus.textContent = '';
+            showNotice((payload && payload.reason) || 'Η δημιουργία απέτυχε. Δοκιμάστε ξανά.', 'error');
+          })
+          .catch(function () {
+            submitBtn.disabled = false;
+            submitStatus.textContent = '';
+            showNotice('Η μεταφόρτωση διακόπηκε. Ελέγξτε τη σύνδεση και δοκιμάστε ξανά.', 'error');
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

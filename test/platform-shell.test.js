@@ -83,7 +83,7 @@ test('module registry declares AutoPoster as the first customer module', () => {
   const customer = platformModules.listCustomerModules();
   assert.ok(customer.length >= 1);
   assert.equal(customer[0].id, 'autoposter');
-  assert.equal(customer[0].href, '/platform/autoposter');
+  assert.equal(customer[0].href, '/platform/compose');
   assert.equal(customer[0].state, platformModules.STATE_ACTIVE);
 });
 
@@ -279,7 +279,7 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   //    owning module's review page rather than approving anything itself.
   assert.ok(pages['/platform/approvals'].includes('data-work="batch-waiting-0002"'));
   assert.ok(!pages['/platform/approvals'].includes('data-work="batch-donee-0004"'));
-  assert.ok(pages['/platform/approvals'].includes('/platform/autoposter/batches/batch-waiting-0002'));
+  assert.ok(pages['/platform/approvals'].includes('/platform/compose/batch-waiting-0002'));
 
   // 8. Evidence indexes every work record with its prepared/failed/accepted tally.
   for (const record of BATCH_RECORDS) {
@@ -329,11 +329,12 @@ test('the platform shell is English-only and leaves legacy module copy alone', a
     assert.equal(GREEK_CHARACTERS.test(`${item.title} ${item.stateReason}`), false, `${record.batchId} projection must be English`);
   }
 
-  // 3. The AutoPoster module page is legacy Greek-first product copy and is
-  //    EXCLUDED from the rule above — only the shell chrome it inherits (brand
-  //    header + canonical nav) must be English. Asserting both directions stops
-  //    this correction from silently bleeding into the module's own copy.
-  const modulePage = await (await fetch(`${baseUrl}/platform/autoposter`)).text();
+  // 3. The AutoPoster module page — now the canonical composer — is Greek-first
+  //    product copy and is EXCLUDED from the rule above; only the shell chrome
+  //    it inherits (brand header + canonical nav) must be English. Asserting
+  //    both directions stops this correction from silently bleeding into the
+  //    module's own copy.
+  const modulePage = await (await fetch(`${baseUrl}/platform/compose`)).text();
   assert.equal(GREEK_CHARACTERS.test(shellChrome(modulePage)), false, 'shell chrome must be English on module pages too');
   assert.ok(GREEK_CHARACTERS.test(modulePage), 'legacy AutoPoster copy must stay Greek-first');
 });

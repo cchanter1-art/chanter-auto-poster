@@ -35,8 +35,11 @@ const MODULES = Object.freeze([
     surface: SURFACE_CUSTOMER,
     state: STATE_ACTIVE,
     owner: 'CHANTER Platform',
-    href: '/platform/autoposter',
-    summary: 'Batch video and image upload, AI preparation, human review, staggered scheduling.'
+    // The canonical composer. One posting workflow for one account and for
+    // many; the package decides which capabilities inside it are usable, not
+    // which route the customer gets.
+    href: '/platform/compose',
+    summary: 'One composer: upload, accounts, caption, schedule, review, accept.'
   },
   {
     id: 'publishing-queue',
@@ -44,8 +47,10 @@ const MODULES = Object.freeze([
     surface: SURFACE_CUSTOMER,
     state: STATE_ACTIVE,
     owner: 'CHANTER Platform',
+    // Observing work, not creating it: connected channels, release queue and
+    // publish history stay here, outside the composer.
     href: '/private/autoposter',
-    summary: 'Full operations console: connected channels, release queue, publish history.'
+    summary: 'Connected channels, release queue, publish history.'
   },
   {
     id: 'operator',

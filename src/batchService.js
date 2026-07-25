@@ -25,11 +25,13 @@ const { computeBatchSchedulePlan } = require('./maxScheduler');
 const providers = require('./providers');
 const { normalizeSoundMode } = require('./tiktokSoundMode');
 const { isTikTokPrivacyLevel, normalizeTikTokPrivacyLevel } = require('./tiktokPrivacy');
+const composerPolicy = require('./composerPolicy');
 
 // Fan-out destination count bound. Source-video count is already bounded by
 // config.batchIntake.maxItems; this guards against an unbounded N x M
-// explosion independent of that.
-const MAX_DESTINATIONS = 10;
+// explosion independent of that. The package may lower the usable number
+// (src/composerPolicy.js); nothing may raise it above this ceiling.
+const MAX_DESTINATIONS = composerPolicy.MAX_DESTINATIONS;
 
 class BatchServiceError extends Error {
   constructor(message, { status = 400, code = 'validation_failed', details = {} } = {}) {
@@ -293,6 +295,31 @@ function createBatchService(dependencies = {}) {
 
     const intakeKey = String(input.intakeKey || '').trim() || randomUUID();
     const commercialContext = await resolveScope(context);
+
+    // Package capability enforcement, before anything durable is written. The
+    // composer mirrors these same rules in its UI, but a disabled control is
+    // never the boundary — a locked capability has to be unusable through the
+    // API too. Resolution comes from the one canonical seam, so no plan name
+    // is ever compared here.
+    const capability = composerPolicy.resolveComposerCapabilities(commercialContext, {
+      maxItems: settings.maxItems
+    });
+    const capabilityCheck = composerPolicy.checkComposerSubmission(capability, {
+      destinationCount: destinations.length,
+      itemCount: files.length
+    });
+    if (!capabilityCheck.allowed) {
+      throw new BatchServiceError(capabilityCheck.reason, {
+        status: 403,
+        code: capabilityCheck.code,
+        details: {
+          limit: capabilityCheck.limit,
+          current: capabilityCheck.current,
+          planId: capability.planId
+        }
+      });
+    }
+
     const workspaceId = commercialContext.workspace.workspaceId;
     const batchId = deriveBatchId(context.userId, workspaceId, intakeKey);
 
@@ -681,6 +708,20 @@ function createBatchService(dependencies = {}) {
     };
   }
 
+  // Composer capabilities for the signed-in workspace, resolved through the
+  // same seam the write path enforces with — the UI and the server can never
+  // disagree about what a package unlocks. Unverifiable plan truth degrades to
+  // the documented compatibility default instead of failing the page.
+  async function getComposerCapabilities(context) {
+    try {
+      return composerPolicy.resolveComposerCapabilities(await resolveScope(context), {
+        maxItems: settings.maxItems
+      });
+    } catch {
+      return composerPolicy.compatibilityCapabilities(settings.maxItems);
+    }
+  }
+
   async function acceptItems(context, batchId, input = {}) {
     if (!context.approval || !context.approval.approvedBy) {
       throw new BatchServiceError('Acceptance requires an explicit human approver.', {
@@ -918,6 +959,7 @@ function createBatchService(dependencies = {}) {
     getBatchView,
     listBatches,
     listDestinations,
+    getComposerCapabilities,
     resumePreparation,
     startPreparation,
     updateItem,

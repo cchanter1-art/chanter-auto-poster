@@ -255,7 +255,7 @@ test('a customer module keeps links that stay inside its own declared route', as
   registry.register(createAutoPosterWorkProvider({ listBatches: async () => ({ batches: AUTOPOSTER_BATCHES }) }));
   const collected = await registry.collect({});
   for (const item of collected.items) {
-    assert.equal(item.href, `/platform/autoposter/batches/${item.workId}`);
+    assert.equal(item.href, `/platform/compose/${item.workId}`);
     assert.equal(item.actionable, true);
   }
 });
@@ -267,7 +267,7 @@ test('internal module work is never linkable, whatever route it claims', async (
     moduleId: 'operator',
     listWork: async () => [{
       ...platformStatus.projectOperatorMissionGraph(OPERATOR_GRAPHS[0]),
-      href: '/platform/autoposter/batches/not-yours'
+      href: '/platform/compose/not-yours'
     }]
   });
   const collected = await registry.collect({});

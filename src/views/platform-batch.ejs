@@ -12,7 +12,7 @@
     <%- include('_platform-nav', { active: locals.active || '' }) %>
 
     <div class="breadcrumb">
-      <a href="/platform">Platform</a> / <a href="/platform/work">Work</a> / <a href="/platform/autoposter">AutoPoster</a> / Παρτίδα
+      <a href="/platform">Platform</a> / <a href="/platform/work">Work</a> / <a href="/platform/compose">Σύνθεση</a> / Έλεγχος
     </div>
     <h1 class="page-title">Έλεγχος παρτίδας</h1>
     <p class="page-subtitle">
@@ -642,7 +642,7 @@
           if (failedCount > 0) summary += ' Απέτυχαν: ' + failedCount + '.';
           if (payload.batchClosed) {
             showNotice(summary + ' Η παρτίδα έκλεισε.', 'ok');
-            setTimeout(function () { window.location.href = '/platform/autoposter'; }, 1200);
+            setTimeout(function () { window.location.href = '/platform/compose'; }, 1200);
             return;
           }
           deleteBatchBtn.disabled = false;

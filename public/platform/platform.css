@@ -574,3 +574,114 @@ textarea { resize: vertical; min-height: 64px; }
   border-top: 1px solid var(--border-soft);
   padding-top: 16px;
 }
+
+/* ── Unified Post Composer ──────────────────────────────────────────────────
+   One composer for one account and for many. Nothing here encodes a "mode":
+   the step rail reports state, and locked capabilities are one quiet line. */
+.en-title { color: var(--text-faint); font-weight: 400; }
+
+.step-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 5px 13px 5px 6px;
+}
+.step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 11px;
+}
+.step-done { color: var(--text); border-color: var(--ok); }
+.step-done .step-mark {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--accent-ink);
+  font-size: 0;
+}
+.step-done .step-mark::before { content: "✔"; font-size: 11px; }
+
+.compose-step { border-top: 1px solid var(--border-soft); padding-top: 20px; margin-top: 22px; }
+.compose-step:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+.compose-step-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.compose-step-head .section-title { margin: 0; }
+.step-state { font-size: 12.5px; color: var(--text-faint); }
+.step-state-done { color: var(--ok); }
+
+/* A locked capability is stated once, in place, and never sends the user to a
+   different interface. */
+.lock-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--text-dim);
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 11px;
+  margin: 0 0 14px;
+}
+.lock-reason { font-size: 12px; color: var(--text-faint); }
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+  color: var(--text);
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.toggle-row input { width: auto; }
+
+.per-account-panel { margin: 4px 0 14px; }
+.per-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.per-account-row:last-child { border-bottom: 0; }
+.per-account-name { font-size: 13px; color: var(--text-dim); }
+.per-account-row select { width: auto; min-width: 170px; }
+
+.advanced-schedule { margin-top: 14px; }
+.advanced-schedule summary {
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style: none;
+}
+.advanced-schedule summary::-webkit-details-marker { display: none; }
+.advanced-schedule summary::before { content: "▸ "; color: var(--text-faint); }
+.advanced-schedule[open] summary::before { content: "▾ "; }
+
+.review-list { list-style: none; margin: 0 0 18px; padding: 0; }
+.review-list li { font-size: 13.5px; padding: 4px 0; }
+.review-ok { color: var(--text); }
+.review-todo { color: var(--text-faint); }
+
+.file-list li .btn-quiet { padding: 2px 8px; }
