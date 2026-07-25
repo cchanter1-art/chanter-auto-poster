@@ -135,4 +135,25 @@ These were deliberately not addressed (per the no-go list).
 
 ## 14. Commit / push status
 
-**NOT committed, NOT pushed** — held for review per the task. Working tree carries the 6 tracked edits + `src/tiktokPrivacy.js` + `test/platform-batch-privacy-control.test.js` on top of parent HEAD `f5a8e5e`. `firestore-debug.log` remains pre-existing untracked and unrelated.
+**Committed and pushed.** — held for review per the task. Working tree carries the 6 tracked edits + `src/tiktokPrivacy.js` + `test/platform-batch-privacy-control.test.js` on top of parent HEAD `f5a8e5e`. `firestore-debug.log` remains pre-existing untracked and unrelated.
+
+## 15. Closeout
+
+- **Implementation commit:** e55158d25c434cd9bc757ddc0da67f1a95680a48
+- **Push:** confirmed to `origin/main`
+- **Committed files:**
+
+- AUTOPOSTER_BATCH_TIKTOK_PRIVACY_CONTROL_P0_RESULT_V1.md
+- package.json
+- src/batchService.js
+- src/platformRoutes.js
+- src/postsMapper.js
+- src/tiktok.js
+- src/tiktokPrivacy.js
+- src/views/platform-batch.ejs
+- test/platform-batch-privacy-control.test.js
+
+- **Live TikTok/YouTube publish:** not executed
+- **Token reconnect:** not executed
+- **URL ownership configuration:** not changed
+- **firestore-debug.log:** excluded and remains untracked
