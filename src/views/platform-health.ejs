@@ -1,82 +1,71 @@
 <!DOCTYPE html>
-<html lang="el">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>Κατάσταση συστήματος — CHANTER Platform</title>
+  <title>System health — CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
 <body>
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
 
-    <div class="breadcrumb"><a href="/platform">Πλατφόρμα</a> / Κατάσταση</div>
-    <h1 class="page-title">Κατάσταση συστήματος</h1>
+    <div class="breadcrumb"><a href="/platform">Platform</a> / System health</div>
+    <h1 class="page-title">System health</h1>
     <p class="page-subtitle">
-      Μία μετρημένη ένδειξη αποθήκευσης και μία σταθερή εγγύηση έγκρισης. Ό,τι δεν μετριέται, δηλώνεται ως άγνωστο.
-      &middot; One measured storage signal and one fixed approval guarantee. Anything unmeasured is reported as unknown.
+      One measured storage signal and one fixed approval guarantee. Anything unmeasured is reported as unknown.
     </p>
 
     <div class="health-grid" data-testid="health-grid">
       <div class="panel health-card" data-health="storage">
         <div class="health-head">
-          <div class="health-name">Αποθήκευση &middot; Storage</div>
+          <div class="health-name">Storage</div>
           <span class="chip <%= health.storage.reachable === true ? 'chip-ready' : (health.storage.reachable === false ? 'chip-failed' : 'chip-neutral') %>">
-            <%= health.storage.reachable === true ? 'Προσβάσιμη' : (health.storage.reachable === false ? 'Μη προσβάσιμη' : 'Άγνωστη') %>
+            <%= health.storage.reachable === true ? 'Reachable' : (health.storage.reachable === false ? 'Unreachable' : 'Unknown') %>
           </span>
         </div>
-        <div class="health-detail">
-          Πάροχος: <%= health.storage.provider %> &middot; λειτουργία: <%= health.storage.mode %>
-        </div>
-        <div class="health-detail-en">Provider: <%= health.storage.provider %> &middot; mode: <%= health.storage.mode %></div>
+        <div class="health-detail">Provider: <%= health.storage.provider %> &middot; mode: <%= health.storage.mode %></div>
       </div>
 
       <div class="panel health-card" data-health="approval">
         <div class="health-head">
-          <div class="health-name">Έγκριση &middot; Approval</div>
-          <span class="chip chip-ready">Υποχρεωτική</span>
+          <div class="health-name">Approval</div>
+          <span class="chip chip-ready">Approval required</span>
         </div>
-        <div class="health-detail">Καμία δημοσίευση δεν προγραμματίζεται χωρίς ανθρώπινη έγκριση.</div>
-        <div class="health-detail-en">Nothing is scheduled without human approval.</div>
+        <div class="health-detail">Nothing is scheduled without human approval.</div>
       </div>
 
       <div class="panel health-card" data-health="modules">
         <div class="health-head">
-          <div class="health-name">Ενότητες &middot; Modules</div>
+          <div class="health-name">Modules</div>
           <span class="chip chip-neutral"><%= customerModuleCount %> + <%= internalModuleCount %></span>
         </div>
-        <div class="health-detail"><%= customerModuleCount %> ενεργές για εσάς, <%= internalModuleCount %> εσωτερικές.</div>
-        <div class="health-detail-en"><%= customerModuleCount %> active for you, <%= internalModuleCount %> internal.</div>
+        <div class="health-detail"><%= customerModuleCount %> active for you, <%= internalModuleCount %> internal.</div>
       </div>
 
       <div class="panel health-card" data-health="work">
         <div class="health-head">
-          <div class="health-name">Εργασίες &middot; Work</div>
-          <span class="chip <%= workError ? 'chip-failed' : 'chip-neutral' %>"><%= workError ? 'Άγνωστες' : workSummary.total %></span>
+          <div class="health-name">Work</div>
+          <span class="chip <%= workError ? 'chip-failed' : 'chip-neutral' %>"><%= workError ? 'Unknown' : workSummary.total %></span>
         </div>
         <div class="health-detail">
           <% if (workError) { %>
-            Δεν ήταν δυνατή η ανάγνωση των εργασιών.
+            Work could not be read.
           <% } else { %>
-            <%= workSummary.running %> σε εξέλιξη, <%= workSummary.awaitingApproval %> σε αναμονή έγκρισης, <%= workSummary.failed %> με αποτυχία.
-          <% } %>
-        </div>
-        <div class="health-detail-en">
-          <% if (workError) { %><%= workError %><% } else { %>
             <%= workSummary.running %> running, <%= workSummary.awaitingApproval %> waiting for approval, <%= workSummary.failed %> failed.
           <% } %>
         </div>
+        <% if (workError) { %><div class="health-detail-en"><%= workError %></div><% } %>
       </div>
     </div>
 
     <p class="section-note" style="margin-top:18px" data-testid="health-observed-at">
-      Μέτρηση: <%= health.observedAt %> &middot; observed at <%= health.observedAt %>
+      Observed at <%= health.observedAt %>
     </p>
 
     <p class="footer-note">
-      Η ετοιμότητα εκτέλεσης, τα workers και η κατάσταση deployment παρακολουθούνται εσωτερικά στο Operator και δεν δηλώνονται εδώ.
-      &middot; Runtime readiness, workers and deployment status are tracked internally in Operator and are not claimed here.
+      Runtime readiness, workers and deployment status are tracked internally in Operator and are not claimed here.
     </p>
   </div>
 </body>

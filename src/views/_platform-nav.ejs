@@ -3,13 +3,16 @@
 // passes `active` (one of: overview, modules, work, approvals, evidence,
 // health, or '' for a page nested under a module). One list, one order — this
 // is the only place the top-level information architecture is declared.
+//
+// Shell copy is English-only (worldwide-first). The Greek-first product copy on
+// the AutoPoster module's own pages is legacy content and stays as it is.
 const platformNavItems = [
-  { id: 'overview',  href: '/platform',            label: 'Επισκόπηση', labelEn: 'Overview' },
-  { id: 'modules',   href: '/platform/modules',    label: 'Ενότητες',   labelEn: 'Modules' },
-  { id: 'work',      href: '/platform/work',       label: 'Εργασίες',   labelEn: 'Work' },
-  { id: 'approvals', href: '/platform/approvals',  label: 'Εγκρίσεις',  labelEn: 'Approvals' },
-  { id: 'evidence',  href: '/platform/evidence',   label: 'Τεκμήρια',   labelEn: 'Evidence' },
-  { id: 'health',    href: '/platform/health',     label: 'Κατάσταση',  labelEn: 'System health' }
+  { id: 'overview',  href: '/platform',           label: 'Overview' },
+  { id: 'modules',   href: '/platform/modules',   label: 'Modules' },
+  { id: 'work',      href: '/platform/work',      label: 'Work' },
+  { id: 'approvals', href: '/platform/approvals', label: 'Approvals' },
+  { id: 'evidence',  href: '/platform/evidence',  label: 'Evidence' },
+  { id: 'health',    href: '/platform/health',    label: 'System health' }
 ];
 %>
 <header class="platform-header">
@@ -18,9 +21,9 @@ const platformNavItems = [
     <span class="product">Platform</span>
   </div>
   <nav class="header-nav">
-    <a href="/private/autoposter">Κλασική κονσόλα</a>
+    <a href="/private/autoposter">Classic console</a>
     <form method="post" action="/logout" style="display:inline">
-      <button type="submit" class="btn btn-quiet" style="padding:0;font-size:13.5px">Αποσύνδεση</button>
+      <button type="submit" class="btn btn-quiet" style="padding:0;font-size:13.5px">Sign out</button>
     </form>
   </nav>
 </header>
@@ -32,6 +35,6 @@ const platformNavItems = [
       href="<%= item.href %>"
       data-nav="<%= item.id %>"
       <%- active === item.id ? 'aria-current="page"' : '' %>
-    ><%= item.label %> <span class="platform-nav-en"><%= item.labelEn %></span></a>
+    ><%= item.label %></a>
   <% } %>
 </nav>

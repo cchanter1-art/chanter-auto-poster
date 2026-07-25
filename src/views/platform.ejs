@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="el">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,60 +13,53 @@
 
     <h1 class="page-title">CHANTER Platform</h1>
     <p class="page-subtitle">
-      Μία πλατφόρμα για όλη τη δουλειά σας: ενότητες, εργασίες σε εξέλιξη, εγκρίσεις και τεκμήρια σε ένα σημείο.
-      &middot; One platform: modules, running work, approvals and evidence in one place.
+      One platform: modules, running work, approvals and evidence in one place.
     </p>
 
     <% if (workError) { %>
-      <div class="notice notice-error" data-testid="work-error">Οι εργασίες δεν είναι διαθέσιμες αυτή τη στιγμή. &middot; <%= workError %></div>
+      <div class="notice notice-error" data-testid="work-error">Work is unavailable right now. &middot; <%= workError %></div>
     <% } %>
 
-    <h2 class="section-title">Κατάσταση εργασιών &middot; Work at a glance</h2>
+    <h2 class="section-title">Work at a glance</h2>
     <div class="stat-grid" data-testid="overview-summary">
       <a class="stat-tile" href="/platform/work" data-stat="running">
         <div class="stat-value"><%= workSummary.running %></div>
-        <div class="stat-label">Σε εξέλιξη</div>
-        <div class="stat-label-en">Running</div>
+        <div class="stat-label">Running</div>
       </a>
       <a class="stat-tile" href="/platform/approvals" data-stat="awaiting-approval">
         <div class="stat-value"><%= workSummary.awaitingApproval %></div>
-        <div class="stat-label">Αναμονή έγκρισης</div>
-        <div class="stat-label-en">Waiting for approval</div>
+        <div class="stat-label">Waiting for approval</div>
       </a>
       <a class="stat-tile" href="/platform/work" data-stat="failed">
         <div class="stat-value"><%= workSummary.failed %></div>
-        <div class="stat-label">Απέτυχαν</div>
-        <div class="stat-label-en">Failed</div>
+        <div class="stat-label">Failed</div>
       </a>
       <a class="stat-tile" href="/platform/health" data-stat="modules">
         <div class="stat-value"><%= customerModules.length %></div>
-        <div class="stat-label">Ενεργές ενότητες</div>
-        <div class="stat-label-en">Active modules</div>
+        <div class="stat-label">Active modules</div>
       </a>
     </div>
 
-    <h2 class="section-title">Ενότητες &middot; Modules</h2>
-    <p class="section-note">Η AutoPoster είναι η πρώτη ενεργή ενότητα της πλατφόρμας. &middot; AutoPoster is the platform's first active module.</p>
+    <h2 class="section-title">Modules</h2>
+    <p class="section-note">AutoPoster is the platform's first active module.</p>
     <div class="module-grid">
       <% customerModules.forEach(function (module, index) { %>
         <a class="module-card<%= index === 0 ? '' : ' secondary' %>" href="<%= module.href %>" data-module="<%= module.id %>">
           <div class="module-card-head">
             <div class="module-name"><%= module.name %></div>
-            <span class="chip chip-ready">Ενεργή</span>
+            <span class="chip chip-ready">Active</span>
           </div>
           <div class="module-desc"><%= module.summary %></div>
-          <div class="module-desc-en"><%= module.summaryEn %></div>
         </a>
       <% }); %>
     </div>
     <p class="section-note" style="margin-top:14px">
-      Επιπλέον <%= internalModuleCount %> εσωτερικές ενότητες λειτουργούν πίσω από το Operator και δεν ελέγχονται από εδώ.
-      &middot; A further <%= internalModuleCount %> internal modules run behind Operator and are not controlled from here.
-      <a href="/platform/modules">Δείτε όλες τις ενότητες</a>
+      A further <%= internalModuleCount %> internal modules run behind Operator and are not controlled from here.
+      <a href="/platform/modules">See all modules</a>
     </p>
 
     <p class="footer-note">
-      Καμία δημοσίευση δεν γίνεται χωρίς ανθρώπινη έγκριση. &middot; Nothing publishes without human approval.
+      Nothing publishes without human approval.
     </p>
   </div>
 </body>

@@ -146,7 +146,7 @@ async function loadPlatformWork(req) {
     return {
       items: [],
       summary: platformStatus.summarizeWork([]),
-      error: (error && error.message) || 'Οι εργασίες δεν είναι διαθέσιμες αυτή τη στιγμή.'
+      error: (error && error.message) || 'Work is unavailable right now.'
     };
   }
 }

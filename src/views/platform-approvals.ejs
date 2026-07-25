@@ -1,31 +1,29 @@
 <!DOCTYPE html>
-<html lang="el">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>Εγκρίσεις — CHANTER Platform</title>
+  <title>Approvals — CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
 <body>
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
 
-    <div class="breadcrumb"><a href="/platform">Πλατφόρμα</a> / Εγκρίσεις</div>
-    <h1 class="page-title">Εγκρίσεις</h1>
+    <div class="breadcrumb"><a href="/platform">Platform</a> / Approvals</div>
+    <h1 class="page-title">Approvals</h1>
     <p class="page-subtitle">
-      Ό,τι περιμένει άνθρωπο. Η ίδια η έγκριση δίνεται μέσα στην ενότητα, ποτέ από αυτή τη λίστα.
-      &middot; Everything waiting on a person. Approval itself is granted inside the module, never from this list.
+      Everything waiting on a person. Approval itself is granted inside the module, never from this list.
     </p>
 
     <% if (workError) { %>
-      <div class="notice notice-error" data-testid="work-error">Οι εγκρίσεις δεν είναι διαθέσιμες αυτή τη στιγμή. &middot; <%= workError %></div>
+      <div class="notice notice-error" data-testid="work-error">Approvals are unavailable right now. &middot; <%= workError %></div>
     <% } %>
 
     <% if (items.length === 0) { %>
       <div class="empty-state" data-testid="approvals-empty">
-        <div>Δεν εκκρεμεί καμία έγκριση.</div>
-        <div class="en">Nothing is waiting for approval.</div>
+        <div>Nothing is waiting for approval.</div>
       </div>
     <% } else { %>
       <div class="batch-list" data-testid="approvals-list">
@@ -39,16 +37,15 @@
                 &middot; <%= item.stateReason %>
               </div>
             </div>
-            <div class="counts"><%= item.counts.awaiting %> προς έλεγχο &middot; to review</div>
-            <span class="chip <%= view.chip %>" title="<%= view.labelEn %>">Άνοιγμα για έλεγχο</span>
+            <div class="counts"><%= item.counts.awaiting %> to review</div>
+            <span class="chip <%= view.chip %>">Open to review</span>
           </a>
         <% }); %>
       </div>
     <% } %>
 
     <p class="footer-note">
-      Καμία δημοσίευση δεν προγραμματίζεται πριν εγκρίνει άνθρωπος κάθε στοιχείο μέσα στην ενότητα.
-      &middot; Nothing is scheduled until a human accepts each item inside the module.
+      Nothing is scheduled until a human accepts each item inside the module.
     </p>
   </div>
 </body>

@@ -157,7 +157,7 @@ test('work summary counts states and sorting lifts approvals to the top', () => 
 test('every canonical state has a presentation and a paused slot exists', () => {
   for (const state of Object.values(WORK_STATE)) {
     const view = platformStatus.presentation(state);
-    assert.ok(view.label && view.labelEn && view.chip, `${state} must be presentable`);
+    assert.ok(view.label && view.chip, `${state} must be presentable`);
   }
   assert.ok(platformStatus.WORK_STATE_ORDER.includes(WORK_STATE.PAUSED));
 });
@@ -183,6 +183,27 @@ function hrefsIn(html) {
   return Array.from(html.matchAll(/href="([^"]+)"/g))
     .map((match) => match[1])
     .filter((href) => !href.endsWith('.css'));
+}
+
+function healthCard(html, name) {
+  const start = html.indexOf(`data-health="${name}"`);
+  assert.notEqual(start, -1, `health card ${name} must render`);
+  const end = html.indexOf('data-health="', start + 1);
+  return end === -1 ? html.slice(start) : html.slice(start, end);
+}
+
+// Greek and Coptic + Greek Extended. The Platform shell is worldwide-first and
+// English-only; the AutoPoster module's own pages stay Greek-first and are
+// excluded by name wherever this is applied.
+const GREEK_CHARACTERS = /[Ͱ-Ͽἀ-῿]/;
+
+// The shell chrome (brand header + canonical nav) is everything a shell page
+// renders before its first page-specific element.
+function shellChrome(html) {
+  const marker = html.indexOf('<div class="breadcrumb"');
+  const heading = html.indexOf('<h1');
+  const cut = marker === -1 ? heading : Math.min(marker, heading === -1 ? marker : heading);
+  return cut === -1 ? html : html.slice(0, cut);
 }
 
 test('platform shell serves six canonical surfaces with separated boundaries', async (t) => {
@@ -267,10 +288,54 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
 
   // 9. Health reports the unconfigured storage probe honestly as unknown
   //    rather than as healthy, and states the approval guarantee.
-  assert.ok(pages['/platform/health'].includes('data-health="storage"'));
-  assert.ok(pages['/platform/health'].includes('Άγνωστη'));
-  assert.ok(!pages['/platform/health'].includes('Προσβάσιμη</span>'));
+  const storageCard = healthCard(pages['/platform/health'], 'storage');
+  assert.ok(storageCard.includes('Unknown'));
+  assert.ok(!storageCard.includes('Reachable'), 'an unconfigured probe must not read as reachable');
   assert.ok(pages['/platform/health'].includes('data-health="approval"'));
+  assert.ok(pages['/platform/health'].includes('Approval required'));
+});
+
+test('the platform shell is English-only and leaves legacy module copy alone', async (t) => {
+  const originalListBatches = batchService.listBatches;
+  batchService.listBatches = async () => ({ batches: BATCH_RECORDS });
+  const server = await startServer();
+  t.after(() => {
+    batchService.listBatches = originalListBatches;
+    server.close();
+  });
+
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  // 1. The six shell surfaces carry no Greek character at all. They render only
+  //    shell copy, so nothing here needs excluding.
+  for (const path of ['/platform', '/platform/modules', '/platform/work', '/platform/approvals', '/platform/evidence', '/platform/health']) {
+    const html = await (await fetch(`${baseUrl}${path}`)).text();
+    const greek = html.match(GREEK_CHARACTERS);
+    assert.equal(greek, null, `${path} must be English-only, found "${greek && greek[0]}"`);
+    assert.match(html, /<html lang="en">/);
+  }
+
+  // 2. The registry and the canonical state vocabulary are the copy sources
+  //    behind those pages, so assert them directly too.
+  for (const module of platformModules.listModules()) {
+    assert.equal(GREEK_CHARACTERS.test(`${module.name} ${module.summary} ${module.owner}`), false, `module ${module.id} copy must be English`);
+  }
+  for (const state of Object.values(WORK_STATE)) {
+    assert.equal(GREEK_CHARACTERS.test(platformStatus.presentation(state).label), false);
+  }
+  for (const record of BATCH_RECORDS) {
+    const item = platformStatus.projectAutoPosterBatch(record);
+    assert.equal(GREEK_CHARACTERS.test(`${item.title} ${item.stateReason}`), false, `${record.batchId} projection must be English`);
+  }
+
+  // 3. The AutoPoster module page is legacy Greek-first product copy and is
+  //    EXCLUDED from the rule above — only the shell chrome it inherits (brand
+  //    header + canonical nav) must be English. Asserting both directions stops
+  //    this correction from silently bleeding into the module's own copy.
+  const modulePage = await (await fetch(`${baseUrl}/platform/autoposter`)).text();
+  assert.equal(GREEK_CHARACTERS.test(shellChrome(modulePage)), false, 'shell chrome must be English on module pages too');
+  assert.ok(GREEK_CHARACTERS.test(modulePage), 'legacy AutoPoster copy must stay Greek-first');
 });
 
 test('platform shell APIs are read-only projections of the same truth', async (t) => {
@@ -329,7 +394,9 @@ test('an unreachable store degrades the shell instead of breaking or faking it',
   assert.ok(workPage.includes('storage offline for test'));
 
   const healthPage = await (await fetch(`${baseUrl}/platform/health`)).text();
-  assert.ok(healthPage.includes('Άγνωστες'), 'unreadable work must not render as zero healthy work');
+  const workCard = healthCard(healthPage, 'work');
+  assert.ok(workCard.includes('Unknown'), 'unreadable work must not render as zero healthy work');
+  assert.ok(workCard.includes('Work could not be read.'));
 
   const workApi = await (await fetch(`${baseUrl}/api/platform/work`)).json();
   assert.equal(workApi.ok, false);

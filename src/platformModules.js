@@ -5,6 +5,10 @@
 // here makes it *visible* in the shell; it never grants that module a route,
 // an authority, or a capability it does not already own elsewhere.
 //
+// Copy is English-only: the Platform shell is a worldwide-first surface. The
+// Greek-first product copy on the AutoPoster module's own pages is unrelated
+// legacy content and is deliberately untouched.
+//
 // `surface` is the ownership boundary and the only security-relevant field:
 //
 //   'customer' — reachable from this Platform UI by the signed-in account.
@@ -32,18 +36,16 @@ const MODULES = Object.freeze([
     state: STATE_ACTIVE,
     owner: 'CHANTER Platform',
     href: '/platform/autoposter',
-    summary: 'Μαζική μεταφόρτωση βίντεο και εικόνων, προετοιμασία με AI, ανθρώπινη έγκριση και κλιμακωτός προγραμματισμός δημοσιεύσεων.',
-    summaryEn: 'Batch video and image upload, AI preparation, human review, staggered scheduling.'
+    summary: 'Batch video and image upload, AI preparation, human review, staggered scheduling.'
   },
   {
     id: 'publishing-queue',
-    name: 'Ουρά δημοσιεύσεων',
+    name: 'Publishing queue',
     surface: SURFACE_CUSTOMER,
     state: STATE_ACTIVE,
     owner: 'CHANTER Platform',
     href: '/private/autoposter',
-    summary: 'Η πλήρης κονσόλα διαχείρισης: συνδεδεμένα κανάλια, ουρά δημοσιεύσεων, ιστορικό.',
-    summaryEn: 'Full operations console: connected channels, release queue, publish history.'
+    summary: 'Full operations console: connected channels, release queue, publish history.'
   },
   {
     id: 'operator',
@@ -52,8 +54,7 @@ const MODULES = Object.freeze([
     state: STATE_INTERNAL,
     owner: 'CHANTER Internal',
     href: null,
-    summary: 'Εσωτερικό cockpit: αποστολές, εγκρίσεις, ledger εκτελέσεων, ετοιμότητα πλατφόρμας.',
-    summaryEn: 'Internal cockpit: missions, approvals, agent run ledger, platform readiness.'
+    summary: 'Internal cockpit: missions, approvals, agent run ledger, platform readiness.'
   },
   {
     id: 'agent-runtime',
@@ -62,8 +63,7 @@ const MODULES = Object.freeze([
     state: STATE_INTERNAL,
     owner: 'CHANTER Internal',
     href: null,
-    summary: 'Κοινός πυρήνας κύκλου ζωής αποστολών και εργασιών.',
-    summaryEn: 'Shared mission and task lifecycle kernel.'
+    summary: 'Shared mission and task lifecycle kernel.'
   },
   {
     id: 'mcp-server',
@@ -72,8 +72,7 @@ const MODULES = Object.freeze([
     state: STATE_INTERNAL,
     owner: 'CHANTER Internal',
     href: null,
-    summary: 'Επιφάνεια επιθεώρησης και προτάσεων· ποτέ δεν κατέχει εγκρίσεις.',
-    summaryEn: 'Inspection and proposal surface; never owns approval authority.'
+    summary: 'Inspection and proposal surface; never owns approval authority.'
   },
   {
     id: 'loop-governor',
@@ -82,8 +81,7 @@ const MODULES = Object.freeze([
     state: STATE_INTERNAL,
     owner: 'CHANTER Internal',
     href: null,
-    summary: 'Ανθρώπινα εποπτευόμενος έλεγχος βρόχων εργασίας.',
-    summaryEn: 'Human-supervised coding-loop tracker.'
+    summary: 'Human-supervised coding-loop tracker.'
   },
   {
     id: 'memory-vault',
@@ -92,8 +90,7 @@ const MODULES = Object.freeze([
     state: STATE_INTERNAL,
     owner: 'CHANTER Internal',
     href: null,
-    summary: 'Τοπική, ανθρώπινα ελεγχόμενη διαρκής μνήμη.',
-    summaryEn: 'Local-first, human-gated durable memory.'
+    summary: 'Local-first, human-gated durable memory.'
   },
   {
     id: 'safecommit',
@@ -102,8 +99,7 @@ const MODULES = Object.freeze([
     state: STATE_INTERNAL,
     owner: 'CHANTER Internal',
     href: null,
-    summary: 'Συμβουλευτικός έλεγχος αλλαγών κώδικα πριν από κάθε commit.',
-    summaryEn: 'Advisory-only commit review.'
+    summary: 'Advisory-only commit review.'
   },
   {
     id: 'sdk-forge',
@@ -112,8 +108,7 @@ const MODULES = Object.freeze([
     state: STATE_INTERNAL,
     owner: 'CHANTER Internal',
     href: null,
-    summary: 'Μητρώο δυνατοτήτων και παραγόμενα SDK για εσωτερικούς πελάτες.',
-    summaryEn: 'Capability registry and generated SDKs for internal clients.'
+    summary: 'Capability registry and generated SDKs for internal clients.'
   },
   {
     id: 'evolution-worker',
@@ -122,8 +117,7 @@ const MODULES = Object.freeze([
     state: STATE_INTERNAL,
     owner: 'CHANTER Internal',
     href: null,
-    summary: 'Διαρκής, ελεγχόμενος βρόχος αυτοβελτίωσης υπό ανθρώπινη έγκριση.',
-    summaryEn: 'Governed self-improvement loop under human approval.'
+    summary: 'Governed self-improvement loop under human approval.'
   }
 ]);
 
@@ -148,7 +142,7 @@ function getModule(id) {
 // take down the Work surface.
 function moduleLabel(id) {
   const module = getModule(id);
-  return module ? module.name : String(id || 'Άγνωστη ενότητα');
+  return module ? module.name : String(id || 'Unknown module');
 }
 
 module.exports = {

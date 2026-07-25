@@ -5,6 +5,9 @@
 // module produced the work. Modules keep their own internal status vocabulary;
 // this file is the only translation point, and it is pure — no I/O, no clock,
 // no provider calls — so the projection is deterministic and unit-testable.
+//
+// The state VALUES below are the canonical identifiers and must not change;
+// `label` is display copy and is English-only, like the rest of the shell.
 
 const WORK_STATE = Object.freeze({
   IDLE: 'idle',
@@ -25,12 +28,12 @@ const WORK_STATE_ORDER = Object.freeze([
 ]);
 
 const WORK_STATE_PRESENTATION = Object.freeze({
-  [WORK_STATE.IDLE]: { label: 'Σε αναμονή', labelEn: 'Idle', chip: 'chip-neutral' },
-  [WORK_STATE.RUNNING]: { label: 'Σε εξέλιξη', labelEn: 'Running', chip: 'chip-preparing' },
-  [WORK_STATE.WAITING_APPROVAL]: { label: 'Αναμονή έγκρισης', labelEn: 'Waiting for approval', chip: 'chip-attention' },
-  [WORK_STATE.COMPLETED]: { label: 'Ολοκληρώθηκε', labelEn: 'Completed', chip: 'chip-completed' },
-  [WORK_STATE.FAILED]: { label: 'Απέτυχε', labelEn: 'Failed', chip: 'chip-failed' },
-  [WORK_STATE.PAUSED]: { label: 'Σε παύση', labelEn: 'Paused', chip: 'chip-neutral' }
+  [WORK_STATE.IDLE]: { label: 'Idle', chip: 'chip-neutral' },
+  [WORK_STATE.RUNNING]: { label: 'Running', chip: 'chip-preparing' },
+  [WORK_STATE.WAITING_APPROVAL]: { label: 'Waiting for approval', chip: 'chip-attention' },
+  [WORK_STATE.COMPLETED]: { label: 'Completed', chip: 'chip-completed' },
+  [WORK_STATE.FAILED]: { label: 'Failed', chip: 'chip-failed' },
+  [WORK_STATE.PAUSED]: { label: 'Paused', chip: 'chip-neutral' }
 });
 
 function presentation(state) {
@@ -49,18 +52,18 @@ function presentation(state) {
 function autoPosterStateOf(record) {
   const status = String(record.status || '').trim();
   const failed = Number(record.failedCount || 0);
-  if (status === 'empty') return { state: WORK_STATE.IDLE, reason: 'Δεν υπάρχουν στοιχεία.' };
-  if (status === 'preparing') return { state: WORK_STATE.RUNNING, reason: 'Προετοιμασία με AI σε εξέλιξη.' };
-  if (status === 'completed') return { state: WORK_STATE.COMPLETED, reason: 'Όλα τα στοιχεία εγκρίθηκαν.' };
-  if (status === 'ready') return { state: WORK_STATE.WAITING_APPROVAL, reason: 'Έτοιμο για ανθρώπινο έλεγχο.' };
+  if (status === 'empty') return { state: WORK_STATE.IDLE, reason: 'No items.' };
+  if (status === 'preparing') return { state: WORK_STATE.RUNNING, reason: 'AI preparation in progress.' };
+  if (status === 'completed') return { state: WORK_STATE.COMPLETED, reason: 'All items approved.' };
+  if (status === 'ready') return { state: WORK_STATE.WAITING_APPROVAL, reason: 'Waiting for human review.' };
   if (status === 'attention_required') {
     return failed > 0
-      ? { state: WORK_STATE.FAILED, reason: 'Η προετοιμασία απέτυχε για ένα ή περισσότερα στοιχεία.' }
-      : { state: WORK_STATE.WAITING_APPROVAL, reason: 'Χρειάζεται διόρθωση πριν την έγκριση.' };
+      ? { state: WORK_STATE.FAILED, reason: 'Preparation failed for one or more items.' }
+      : { state: WORK_STATE.WAITING_APPROVAL, reason: 'Needs a fix before approval.' };
   }
   // Unknown module status: report idle but surface the raw value rather than
   // guessing that work is running. Nothing is hidden, nothing is invented.
-  return { state: WORK_STATE.IDLE, reason: status ? `Κατάσταση ενότητας: ${status}` : 'Άγνωστη κατάσταση.' };
+  return { state: WORK_STATE.IDLE, reason: status ? `Module status: ${status}` : 'Unknown status.' };
 }
 
 // Projects one durable AutoPoster batch record into a Platform work item.
@@ -77,7 +80,7 @@ function projectAutoPosterBatch(record = {}) {
   return {
     moduleId: 'autoposter',
     workId: batchId,
-    title: `Παρτίδα ${batchId.slice(0, 8) || '—'}`,
+    title: `Batch ${batchId.slice(0, 8) || '—'}`,
     state,
     stateReason: reason,
     counts: { total, prepared, failed, accepted, awaiting },
