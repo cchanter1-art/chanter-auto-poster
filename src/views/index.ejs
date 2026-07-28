@@ -637,6 +637,7 @@
         </div>
       </header>
 
+      <span id="accounts" class="anchor-target" aria-hidden="true"></span>
       <% if (tiktokAccounts.length > 0) { %>
         <section class="account-context" aria-label="Publishing channel">
           <div class="account-context-copy">
@@ -912,7 +913,7 @@
 
       <!-- ─── Release Queue ─── -->
       <div data-queue-view-region>
-      <section class="queue-section" aria-label="Release queue">
+      <section id="queue" class="queue-section" aria-label="Release queue">
         <div class="section-head">
           <div>
             <span class="section-kicker">Queue</span>
@@ -1265,7 +1266,7 @@
       </section>
 
       <!-- ─── Publishing Log ─── -->
-      <details class="history-panel">
+      <details id="activity" class="history-panel">
         <summary>
           <span class="history-title">
             <span class="history-icon" aria-hidden="true"></span>

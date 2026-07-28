@@ -4,8 +4,8 @@
 // health, or '' for a page nested under a module). One list, one order — this
 // is the only place the top-level information architecture is declared.
 //
-// Shell copy is English-only (worldwide-first). The Greek-first product copy on
-// the AutoPoster module's own pages is legacy content and stays as it is.
+// Shell and customer copy are English-only (worldwide-first). Operational
+// surfaces outside the canonical customer path keep their existing copy.
 // 'compose' is the ONE entry for creating and scheduling content. There is no
 // second posting entry: one account and many accounts are the same workflow.
 const platformNavItems = [
@@ -17,22 +17,29 @@ const platformNavItems = [
   { id: 'evidence',  href: '/platform/evidence',  label: 'Evidence' },
   { id: 'health',    href: '/platform/health',    label: 'System health' }
 ];
+const customerNavItems = [
+  { id: 'queue',    href: '/private/autoposter#queue',    label: 'Queue' },
+  { id: 'accounts', href: '/private/autoposter#accounts', label: 'Accounts' },
+  { id: 'activity', href: '/private/autoposter#activity', label: 'Activity' }
+];
+const customerSurface = active === 'compose';
+const navItems = customerSurface ? customerNavItems : platformNavItems;
 %>
 <header class="platform-header">
-  <div class="brand">
+  <a class="brand" href="<%= customerSurface ? '/platform/compose' : '/platform' %>" aria-label="CHANTER <%= customerSurface ? 'AutoPoster' : 'Platform' %>">
     <span class="wordmark">CHANTER</span>
-    <span class="product">Platform</span>
-  </div>
+    <span class="product"><%= customerSurface ? 'AutoPoster' : 'Platform' %></span>
+  </a>
   <nav class="header-nav">
-    <a href="/private/autoposter">Classic console</a>
+    <% if (!customerSurface) { %><a href="/private/autoposter">Classic console</a><% } %>
     <form method="post" action="/logout" style="display:inline">
       <button type="submit" class="btn btn-quiet" style="padding:0;font-size:13.5px">Sign out</button>
     </form>
   </nav>
 </header>
 
-<nav class="platform-nav" aria-label="CHANTER Platform">
-  <% for (const item of platformNavItems) { %>
+<nav class="platform-nav<%= customerSurface ? ' customer-nav' : '' %>" aria-label="<%= customerSurface ? 'AutoPoster' : 'CHANTER Platform' %>">
+  <% for (const item of navItems) { %>
     <a
       class="platform-nav-link<%= active === item.id ? ' platform-nav-link-active' : '' %>"
       href="<%= item.href %>"
