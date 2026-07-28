@@ -204,6 +204,44 @@ test('deletePost fails closed for missing and unauthorized posts', async (t) => 
   assert.equal(docs.has('job-foreign'), true, 'the other user\'s post is untouched');
 });
 
+test('deletePost never physically deletes published or logically archived history', async (t) => {
+  const archive = {
+    schemaVersion: 'chanter.autoposter.operational-archive.v1',
+    state: 'archived',
+    operationId: 'operation-local',
+    archivedAt: '2026-07-28T12:00:00.000Z',
+    archivedBy: 'founder:local-fixture',
+    classification: 'cancelled',
+    candidateSetHash: 'a'.repeat(64),
+    recoverable: true
+  };
+  const { storage, docs, deletions, cleanup } = installStorageMocks({
+    seededDocs: [
+      { id: 'job-published', userId: 'owner', accountId: 'account-a', status: 'posted' },
+      {
+        id: 'job-archived',
+        userId: 'owner',
+        accountId: 'account-a',
+        status: 'cancelled',
+        operationalArchive: archive
+      }
+    ]
+  });
+  t.after(cleanup);
+
+  await assert.rejects(
+    storage.deletePost('owner', 'job-published'),
+    (error) => error.code === 'published_history_protected' && error.status === 409
+  );
+  await assert.rejects(
+    storage.deletePost('owner', 'job-archived'),
+    (error) => error.code === 'published_history_protected' && error.status === 409
+  );
+  assert.equal(docs.has('job-published'), true);
+  assert.equal(docs.has('job-archived'), true);
+  assert.deepEqual(deletions, []);
+});
+
 test('deletePost keeps the channel-scoped contract used by the client portal', async (t) => {
   const { storage, docs, cleanup } = installStorageMocks({
     seededDocs: [

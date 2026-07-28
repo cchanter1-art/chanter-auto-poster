@@ -543,8 +543,14 @@
   <body>
     <%
       const statusOf = (post) => String((post && post.status) || 'pending').toLowerCase();
-      const activePosts = posts.filter((post) => statusOf(post) !== 'posted');
-      const historyPosts = posts.filter((post) => statusOf(post) === 'posted');
+      const isArchived = (post) => Boolean(
+        post
+        && post.operationalArchive
+        && post.operationalArchive.state === 'archived'
+        && post.operationalArchive.recoverable === true
+      );
+      const activePosts = posts.filter((post) => statusOf(post) !== 'posted' && !isArchived(post));
+      const historyPosts = posts.filter((post) => statusOf(post) === 'posted' || isArchived(post));
       const advancedEvidenceEnabled = Boolean(
         typeof commercialView !== 'undefined'
         && commercialView
@@ -1270,13 +1276,13 @@
         <summary>
           <span class="history-title">
             <span class="history-icon" aria-hidden="true"></span>
-            <span><small>Archive</small><strong>Publishing Log</strong></span>
+            <span><small>Archive</small><strong>Operational History</strong></span>
           </span>
-          <span class="history-summary-meta"><span class="count"><%= historyPosts.length %> published</span><span class="history-chevron" aria-hidden="true"></span></span>
+          <span class="history-summary-meta"><span class="count"><%= historyPosts.length %> history</span><span class="history-chevron" aria-hidden="true"></span></span>
         </summary>
         <div class="history-list">
           <% if (historyPosts.length === 0) { %>
-            <div class="history-empty">Nothing posted yet</div>
+            <div class="history-empty">No published or archived history yet</div>
           <% } %>
           <% historyPosts.forEach(function(post) { %>
             <% const mediaPath = helpers.mediaPath(post); %>
@@ -1303,7 +1309,7 @@
                 <div class="queue-top">
                   <div class="queue-title">
                     <h3><%= post.originalName %></h3>
-                    <p class="queue-meta"><%= helpers.formatDateTime(post.postedAt || post.scheduledAt) %> &middot; <%= post.username ? `@${post.username}` : 'Channel unassigned' %><%= post.campaignId ? ` · Campaign ${post.campaignId.slice(0, 8)}` : '' %></p>
+                    <p class="queue-meta"><%= helpers.formatDateTime(post.postedAt || post.scheduledAt || post.createdAt) %> &middot; <%= post.username ? `@${post.username}` : 'Channel unassigned' %><%= post.campaignId ? ` · Campaign ${post.campaignId.slice(0, 8)}` : '' %></p>
                   </div>
                   <span class="badge <%= result.tone %>"><%= displayResultLabel(result, post) %></span>
                 </div>
@@ -1314,11 +1320,7 @@
                   </p>
                   <% if (result.message) { %><p class="result-message"><%= result.message %></p><% } %>
                 <% } %>
-                <div class="card-actions">
-                  <form class="inline-action" action="/posts/<%= post.id %>/delete" method="post" data-delete-form>
-                    <button type="submit" class="btn btn-danger">Remove</button>
-                  </form>
-                </div>
+                <p class="queue-meta">Recoverable history · Physical deletion disabled</p>
                 <% if (advancedEvidenceEnabled && result.hasDebug) { %>
                   <details class="advanced"><summary>Details</summary><div class="advanced-body"><pre><%= result.debugJson %></pre></div></details>
                 <% } %>

@@ -1,5 +1,7 @@
 'use strict';
 
+const { isOperationallyArchived } = require('./operationalHistoryArchive');
+
 // Canonical CHANTER Platform work states. One vocabulary for every module, so
 // the Overview / Work / Approvals surfaces read identically no matter which
 // module produced the work. Modules keep their own internal status vocabulary;
@@ -94,6 +96,7 @@ function projectAutoPosterBatch(record = {}) {
     // Evidence surface — including an empty one, whose evidence is that nothing
     // was ever added to it.
     evidenceAvailable: true,
+    archived: isOperationallyArchived(record),
     videoCount: Number(record.videoCount || 0),
     destinationCount: Number(record.destinationCount || 0)
   };
@@ -132,6 +135,7 @@ function projectAutoPosterRuntimeJob(record = {}) {
     // Keep it solely on runtimeGraphId for exact joins.
     workId: jobId,
     workKind: 'autoposter_runtime_job',
+    archived: isOperationallyArchived(record),
     title: `AutoPoster job ${jobId.slice(0, 8) || '—'}`,
     state,
     stateReason: reason,

@@ -7,6 +7,7 @@ const { sanitizeApprovedMediaIdentity } = require('./approvedMediaIdentity');
 const { safeDiagnosticText } = require('./forbiddenMaterial');
 const { normalizeSoundMode } = require('./tiktokSoundMode');
 const { normalizeTikTokPrivacyLevel } = require('./tiktokPrivacy');
+const { sanitizeOperationalArchive } = require('./operationalHistoryArchive');
 
 const DEFAULT_USER_ID = config.defaultUserId;
 const YOUTUBE_APPROVAL_ATTEMPT_GRANT = 1;
@@ -425,6 +426,9 @@ function postFromDoc(doc) {
     runtimePayloadHash: data.runtimePayloadHash || '',
     approvalId: String(data.approvalId || ''),
     evidenceBundleId: String(data.evidenceBundleId || ''),
+    // Founder-controlled logical archive metadata. The complete post stays in
+    // place; only this bounded, recoverable envelope is projected.
+    operationalArchive: sanitizeOperationalArchive(data.operationalArchive),
     providerProofMode: data.providerProofMode === true,
     approvedMedia: sanitizeApprovedMediaIdentity(data.approvedMedia),
     // Usage linkage contains identifiers and lifecycle state only. Counter
@@ -476,6 +480,8 @@ function mapPatchToFirestore(patch) {
   delete result.username;
   delete result.providerMetadata;
   delete result.publishAttemptBudget;
+  // Only the dedicated archive service may write this envelope.
+  delete result.operationalArchive;
 
   // Destination-level sound mode stays a validated enum through any generic
   // edit surface: an unknown value can never reach storage.

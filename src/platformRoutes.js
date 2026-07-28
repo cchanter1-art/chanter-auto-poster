@@ -275,7 +275,8 @@ function renderAutoPosterList(mode) {
     const owned = autoPosterWorkItems(work);
     const queueMode = mode === 'queue';
     const items = queueMode
-      ? owned.filter((item) => item.state !== platformStatus.WORK_STATE.COMPLETED)
+      ? owned.filter((item) =>
+        !item.archived && item.state !== platformStatus.WORK_STATE.COMPLETED)
       : owned.filter((item) => item.evidenceAvailable);
     res.render('platform-autoposter-list', {
       appName: config.appName,

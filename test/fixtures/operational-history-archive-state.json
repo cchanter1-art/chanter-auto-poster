@@ -1,0 +1,89 @@
+{
+  "authorityManifest": {
+    "schemaVersion": "chanter.autoposter.archive-authority-manifest.v1",
+    "ownerId": "owner",
+    "mode": "explicit_local_fixture",
+    "complete": true,
+    "observedAt": "2026-07-28T11:55:00.000Z",
+    "coverage": {
+      "posts": true,
+      "postBatches": true,
+      "canonicalCommands": true,
+      "missionGraphs": true,
+      "evidenceRecords": true
+    }
+  },
+  "posts": [
+    {
+      "id": "archive-published",
+      "userId": "owner",
+      "workspaceId": "workspace-local",
+      "provider": "youtube",
+      "accountId": "channel-local",
+      "status": "posted",
+      "approvedAt": "2026-07-27T09:00:00.000Z",
+      "approvedBy": "founder:local-fixture",
+      "publishId": "provider-artifact-local-001",
+      "providerOperation": {
+        "operationState": "completed_private",
+        "externalVideoId": "provider-artifact-local-001"
+      },
+      "providerVerification": {
+        "artifactExists": true,
+        "externalVideoId": "provider-artifact-local-001"
+      },
+      "history": [
+        {
+          "at": "2026-07-27T09:05:00.000Z",
+          "event": "posted",
+          "detail": "Local fixture publication evidence."
+        }
+      ],
+      "createdAt": "2026-07-27T08:00:00.000Z",
+      "postedAt": "2026-07-27T09:05:00.000Z"
+    },
+    {
+      "id": "archive-cancelled",
+      "userId": "owner",
+      "workspaceId": "workspace-local",
+      "provider": "tiktok",
+      "accountId": "account-local",
+      "status": "cancelled",
+      "approvalState": "none",
+      "createdAt": "2026-07-26T08:00:00.000Z"
+    },
+    {
+      "id": "archive-legacy",
+      "userId": "owner",
+      "status": "completed",
+      "approvalState": "not_applicable",
+      "createdAt": "2026-07-25T08:00:00.000Z"
+    },
+    {
+      "id": "preserve-active",
+      "userId": "owner",
+      "workspaceId": "workspace-local",
+      "provider": "tiktok",
+      "accountId": "account-local",
+      "status": "processing",
+      "approvedAt": "2026-07-28T08:00:00.000Z",
+      "createdAt": "2026-07-28T07:00:00.000Z"
+    },
+    {
+      "id": "preserve-scheduled",
+      "userId": "owner",
+      "workspaceId": "workspace-local",
+      "provider": "tiktok",
+      "accountId": "account-local",
+      "status": "scheduled",
+      "approvedAt": "2026-07-28T08:00:00.000Z",
+      "scheduledAt": "2026-07-29T08:00:00.000Z",
+      "createdAt": "2026-07-28T07:00:00.000Z"
+    }
+  ],
+  "postBatches": [],
+  "canonicalCommands": [],
+  "missionGraphs": [],
+  "evidenceRecords": [],
+  "archiveOperations": []
+}

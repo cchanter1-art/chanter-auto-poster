@@ -38,6 +38,7 @@ const {
 } = require('./youtubeProviderOperation');
 const { sanitizeApprovedMediaIdentity } = require('./approvedMediaIdentity');
 const { normalizeSoundMode } = require('./tiktokSoundMode');
+const { sanitizeOperationalArchive } = require('./operationalHistoryArchive');
 const {
   DEFAULT_USER_ID,
   postFromDoc,
@@ -2444,6 +2445,14 @@ async function deletePost(userId, id, accountId, workspaceScope) {
     if (accountId && postFromDoc(current).accountId !== accountId) return;
 
     const status = normalizeQueueStatus(currentData.status);
+    if (status === 'posted' || sanitizeOperationalArchive(currentData.operationalArchive)) {
+      const error = new Error(
+        'Published or archived operational history is recoverable and cannot be physically deleted.'
+      );
+      error.status = 409;
+      error.code = 'published_history_protected';
+      throw error;
+    }
     if (
       ['processing', 'outcome_unknown'].includes(status)
       || currentData.outcomeUnknown
@@ -2460,7 +2469,7 @@ async function deletePost(userId, id, accountId, workspaceScope) {
     }
 
     const releasable = ['pending', 'scheduled', 'ready', 'failed'].includes(status);
-    if (!releasable && status !== 'posted') {
+    if (!releasable) {
       const error = new Error('This queue state cannot be deleted safely.');
       error.status = 409;
       error.code = 'queue_transition_blocked';
@@ -2496,17 +2505,6 @@ async function deletePost(userId, id, accountId, workspaceScope) {
         relatedResourceId: current.id,
         reason: 'queue_item_deleted_before_provider_side_effect'
       });
-    }
-
-    if (
-      status === 'posted'
-      && hasCompleteUsageBinding
-      && currentData.usageState !== 'consumed'
-    ) {
-      const error = new Error('Posted usage is not reconciled; deletion was blocked.');
-      error.status = 409;
-      error.code = 'queue_transition_blocked';
-      throw error;
     }
 
     tx.delete(ref);
@@ -2739,6 +2737,7 @@ function batchRecordFromDoc(doc) {
     baseAt: data.baseAt && typeof data.baseAt.toDate === 'function' ? data.baseAt.toDate().toISOString() : null,
     timezoneName: String(data.timezoneName || '').trim(),
     intakeKey: String(data.intakeKey || '').trim(),
+    operationalArchive: sanitizeOperationalArchive(data.operationalArchive),
     createdAt: data.createdAt && typeof data.createdAt.toDate === 'function' ? data.createdAt.toDate().toISOString() : null,
     updatedAt: data.updatedAt && typeof data.updatedAt.toDate === 'function' ? data.updatedAt.toDate().toISOString() : null
   };
