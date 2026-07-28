@@ -28,7 +28,7 @@
         <p>Share this access code with your client through a secure channel (not email/chat that CHANTER staff can see later, if possible). It logs into their portal at <strong>/client/autoposter/login</strong> — nothing else.</p>
         <div class="warn">This code is shown once. It is not stored in plain text — if lost, generate a new one (this invalidates the old one).</div>
         <div class="code-box"><%= code %></div>
-        <a class="btn" href="/private/autoposter">Back to dashboard</a>
+        <a class="btn" href="<%= returnTo || '/private/autoposter' %>">Done</a>
       </section>
     </main>
   </body>

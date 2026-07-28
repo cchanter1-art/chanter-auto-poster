@@ -32,6 +32,7 @@ test('creates signed expiring admin sessions and rejects tampering', () => {
 
 test('only permits local AutoPoster return paths', () => {
   assert.equal(safeReturnTo('/private/autoposter/dashboard'), '/private/autoposter/dashboard');
+  assert.equal(safeReturnTo('/private/autoposter/accounts'), '/private/autoposter/accounts');
   assert.equal(safeReturnTo('https://attacker.example'), '/private/autoposter');
   assert.equal(safeReturnTo('//attacker.example'), '/private/autoposter');
 });
