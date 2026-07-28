@@ -19,10 +19,10 @@ const platformNavItems = [
 ];
 const customerNavItems = [
   { id: 'queue',    href: '/private/autoposter#queue',    label: 'Queue' },
-  { id: 'accounts', href: '/private/autoposter#accounts', label: 'Accounts' },
+  { id: 'accounts', href: '/private/autoposter/accounts', label: 'Accounts' },
   { id: 'activity', href: '/private/autoposter#activity', label: 'Activity' }
 ];
-const customerSurface = active === 'compose';
+const customerSurface = active === 'compose' || active === 'accounts';
 const navItems = customerSurface ? customerNavItems : platformNavItems;
 %>
 <header class="platform-header">

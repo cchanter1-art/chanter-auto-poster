@@ -249,7 +249,7 @@ const renderAutoPoster = asyncRoute(async (req, res) => {
     console.warn('[routes] YouTube channels unavailable', youtubeError.message);
   }
 
-  res.render('index', {
+  res.render(req.path === '/private/autoposter/accounts' ? 'platform-accounts' : 'index', {
     appName: config.appName,
     posts,
     queueView,
@@ -329,6 +329,7 @@ router.post('/logout', requireAdminPage, (req, res) => {
 
 router.get('/', requireAdminPage, renderAutoPoster);
 router.get('/private/autoposter', requireAdminPage, renderAutoPoster);
+router.get('/private/autoposter/accounts', requireAdminPage, renderAutoPoster);
 
 router.get('/private/autoposter/dashboard', requireAdminPage, (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'autoposter-dashboard', 'dashboard.html'));
@@ -432,7 +433,11 @@ router.post('/private/autoposter/account', requireAdminPage, asyncRoute(async (r
     return;
   }
   setActiveTikTokAccountCookie(res, account.accountId);
-  redirectWithNotice(res, `Active TikTok account changed to ${accountLabel(account)}.`);
+  redirectWithNotice(
+    res,
+    `Active TikTok account changed to ${accountLabel(account)}.`,
+    accountSurfaceReturnTo(req)
+  );
 }));
 
 // Generates a brand-new client access code for one TikTok account and
@@ -454,7 +459,8 @@ router.post('/private/autoposter/account/:accountId/client-access', requireAdmin
     appName: config.appName,
     account,
     code,
-    accountLabelText: accountLabel(account)
+    accountLabelText: accountLabel(account),
+    returnTo: accountSurfaceReturnTo(req)
   });
 }));
 
@@ -463,7 +469,11 @@ router.post('/private/autoposter/account/:accountId/client-access/revoke', requi
   const userId = resolveUserId(req);
   const accountId = String(req.params.accountId || '').trim();
   const revoked = await storage.revokeClientAccessCode(userId, accountId, requestWorkspaceScope(req));
-  redirectWithNotice(res, revoked ? 'Client access revoked. The old code no longer works.' : 'TikTok account not found.');
+  redirectWithNotice(
+    res,
+    revoked ? 'Client access revoked. The old code no longer works.' : 'TikTok account not found.',
+    accountSurfaceReturnTo(req)
+  );
 }));
 
 router.get('/connect/tiktok', requireAdminPage, asyncRoute(async (req, res) => {
@@ -480,7 +490,7 @@ router.get('/connect/tiktok', requireAdminPage, asyncRoute(async (req, res) => {
   const state = await oauthStateStore.createOAuthState({
     userId,
     provider: 'tiktok',
-    returnTo: '/',
+    returnTo: safeReturnTo(req.query.returnTo),
     mode: 'connect',
     workspaceId: authorization.commercialContext.workspace.workspaceId
   });
@@ -549,7 +559,11 @@ router.get('/auth/tiktok/callback', asyncRoute(async (req, res) => {
       console.warn('[routes] TikTok profile unavailable after OAuth', profileError.message);
     }
     setActiveTikTokAccountCookie(res, account.accountId);
-    redirectWithNotice(res, `TikTok account ${accountLabel(account)} connected and selected.`);
+    redirectWithNotice(
+      res,
+      `TikTok account ${accountLabel(account)} connected and selected.`,
+      safeReturnTo(consumed.record.returnTo)
+    );
   } catch (error) {
     redirectWithNotice(res, `TikTok connection failed: ${error.message}`);
   }
@@ -565,7 +579,11 @@ router.get('/disconnect/tiktok', requireAdminPage, asyncRoute(async (req, res) =
   }
   await storage.disconnectTikTokAccount(userId, activeAccount.accountId, requestWorkspaceScope(req));
   res.clearCookie(ACTIVE_TIKTOK_ACCOUNT_COOKIE);
-  redirectWithNotice(res, `${accountLabel(activeAccount)} disconnected. Its jobs and history were preserved.`);
+  redirectWithNotice(
+    res,
+    `${accountLabel(activeAccount)} disconnected. Its jobs and history were preserved.`,
+    safeReturnTo(req.query.returnTo)
+  );
 }));
 
 // ── YouTube (Provider #2) connection lifecycle ───────────────────────────
@@ -799,9 +817,13 @@ router.post('/disconnect/youtube', requireAdminPage, asyncRoute(async (req, res)
   }
   await storage.disconnectYouTubeAccount(userId, accountId, requestWorkspaceScope(req));
   const label = youtubeChannelLabel(account);
-  redirectWithNotice(res, revocation.revoked
-    ? `YouTube channel ${label} disconnected and its Google access was revoked. Jobs and history were preserved.`
-    : `YouTube channel ${label} disconnected locally, but Google-side revocation did not complete (${revocation.reason || 'unknown reason'}). You can also remove access at myaccount.google.com/permissions.`);
+  redirectWithNotice(
+    res,
+    revocation.revoked
+      ? `YouTube channel ${label} disconnected and its Google access was revoked. Jobs and history were preserved.`
+      : `YouTube channel ${label} disconnected locally, but Google-side revocation did not complete (${revocation.reason || 'unknown reason'}). You can also remove access at myaccount.google.com/permissions.`,
+    accountSurfaceReturnTo(req)
+  );
 }));
 
 // Safe status lookup for one uploaded video (youtube.readonly). Ownership
@@ -1626,8 +1648,14 @@ function emptyPostCounts() {
   return { total: 0, pending: 0, scheduled: 0, processing: 0, ready: 0, posted: 0, failed: 0 };
 }
 
-function redirectWithNotice(res, notice) {
-  res.redirect(`/private/autoposter?notice=${encodeURIComponent(notice)}`);
+function accountSurfaceReturnTo(req) {
+  const candidate = safeReturnTo(req.body && req.body.returnTo);
+  return candidate === '/private/autoposter/accounts' ? candidate : '/private/autoposter';
+}
+
+function redirectWithNotice(res, notice, returnTo = '/private/autoposter') {
+  const separator = returnTo.includes('?') ? '&' : '?';
+  res.redirect(`${returnTo}${separator}notice=${encodeURIComponent(notice)}`);
 }
 
 // Fast Schedule intake: the campaign form submits over XHR with

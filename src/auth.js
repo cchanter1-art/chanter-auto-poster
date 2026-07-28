@@ -143,6 +143,7 @@ function safeReturnTo(value) {
   try {
     const parsed = new URL(candidate, 'http://autoposter.local');
     const allowedPath = parsed.pathname === '/private/autoposter'
+      || parsed.pathname === '/private/autoposter/accounts'
       || parsed.pathname === '/private/autoposter/dashboard'
       || parsed.pathname === '/connect/tiktok';
     return allowedPath ? `${parsed.pathname}${parsed.search}` : '/private/autoposter';

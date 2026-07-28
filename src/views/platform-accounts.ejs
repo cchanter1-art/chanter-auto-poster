@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Accounts — CHANTER AutoPoster</title>
+  <link rel="stylesheet" href="/platform/platform.css">
+</head>
+<body class="customer-accounts">
+  <div class="shell customer-shell">
+    <%- include('_platform-nav', { active: 'accounts' }) %>
+    <%
+      const readyYouTube = (youtubeChannels || []).find((channel) => channel.connectionStatus !== 'disconnected');
+      const current = activeTikTokAccount || readyYouTube || null;
+      const currentIsTikTok = Boolean(activeTikTokAccount);
+      const currentLabel = current
+        ? (current.username ? `@${String(current.username).replace(/^@/, '')}` : (current.displayName || 'Connected account'))
+        : '';
+      const currentConnected = currentIsTikTok
+        ? Boolean(activeTikTokAccount.connected)
+        : Boolean(current && current.connectionStatus === 'connected');
+      const usage = commercialView && commercialView.usage ? commercialView.usage : {};
+      const plan = commercialView && commercialView.plan ? commercialView.plan : {};
+    %>
+
+    <main class="accounts-main">
+      <% if (notice) { %><div class="accounts-notice" role="status"><%= notice %></div><% } %>
+
+      <% if (!current) { %>
+        <section class="accounts-empty" aria-labelledby="accounts-heading">
+          <h1 id="accounts-heading">Accounts</h1>
+          <details class="account-action account-action-primary add-account-action">
+            <summary>Add Account</summary>
+            <div class="account-action-panel">
+              <a class="account-provider-action" href="/connect/tiktok?new=1&amp;returnTo=%2Fprivate%2Fautoposter%2Faccounts">TikTok</a>
+              <% if (youtubeProvider && youtubeProvider.configured) { %>
+                <a class="account-provider-action" href="/connect/youtube?returnTo=%2Fprivate%2Fautoposter%2Faccounts">YouTube</a>
+              <% } %>
+            </div>
+          </details>
+          <a class="accounts-done-link" href="/platform/compose">Done</a>
+        </section>
+      <% } else { %>
+        <section class="accounts-card" aria-labelledby="accounts-heading">
+          <div class="current-account">
+            <span class="accounts-kicker">Current Account</span>
+            <h1 id="accounts-heading"><%= currentLabel %></h1>
+            <span class="connection-signal <%= currentConnected ? 'is-connected' : 'needs-attention' %>">
+              <span aria-hidden="true"></span><%= currentConnected ? 'Connected' : 'Needs attention' %>
+            </span>
+          </div>
+
+          <div class="accounts-actions" aria-label="Account actions">
+            <details class="account-action account-primary-action">
+              <summary>Switch</summary>
+              <form class="account-action-panel" action="/private/autoposter/account" method="post">
+                <input type="hidden" name="returnTo" value="/private/autoposter/accounts">
+                <label for="accountId">Account</label>
+                <select id="accountId" name="accountId">
+                  <% (tiktokAccounts || []).forEach((account) => { %>
+                    <option value="<%= account.accountId %>" <%= currentIsTikTok && activeTikTokAccount.accountId === account.accountId ? 'selected' : '' %>>
+                      <%= account.username ? `@${account.username}` : (account.displayName || 'TikTok account') %>
+                    </option>
+                  <% }) %>
+                </select>
+                <button class="btn btn-primary" type="submit">Use Account</button>
+              </form>
+            </details>
+
+            <details class="account-action account-primary-action add-account-action">
+              <summary>Add Account</summary>
+              <div class="account-action-panel">
+                <a class="account-provider-action" href="/connect/tiktok?new=1&amp;returnTo=%2Fprivate%2Fautoposter%2Faccounts">TikTok</a>
+                <% if (youtubeProvider && youtubeProvider.configured) { %>
+                  <a class="account-provider-action" href="/connect/youtube?returnTo=%2Fprivate%2Fautoposter%2Faccounts">YouTube</a>
+                <% } %>
+                <% if (enableInstagram) { %>
+                  <a class="account-provider-action" href="/auth/instagram/start">Instagram</a>
+                <% } %>
+              </div>
+            </details>
+
+            <% if (currentIsTikTok) { %>
+              <form class="account-primary-action" action="/private/autoposter/account/<%= activeTikTokAccount.accountId %>/client-access" method="post">
+                <input type="hidden" name="returnTo" value="/private/autoposter/accounts">
+                <button class="account-action-button" type="submit">Client Access</button>
+              </form>
+            <% } %>
+
+            <a class="account-action-button account-primary-action is-done" href="/platform/compose">Done</a>
+          </div>
+
+          <details class="account-manage">
+            <summary>Manage</summary>
+            <div class="account-manage-panel">
+              <section>
+                <h2>Current account</h2>
+                <dl>
+                  <div><dt>Provider</dt><dd><%= currentIsTikTok ? 'TikTok' : 'YouTube' %></dd></div>
+                  <div><dt>State</dt><dd><%= currentConnected ? 'Connected' : 'Needs attention' %></dd></div>
+                  <% if (channelReadiness && channelReadiness.lastVerifiedAt) { %>
+                    <div><dt>Verified</dt><dd><%= helpers.formatDateTime(channelReadiness.lastVerifiedAt) %></dd></div>
+                  <% } %>
+                </dl>
+                <% if (currentIsTikTok) { %>
+                  <% if (activeTikTokAccount.clientAccessEnabled) { %>
+                    <form action="/private/autoposter/account/<%= activeTikTokAccount.accountId %>/client-access/revoke" method="post">
+                      <input type="hidden" name="returnTo" value="/private/autoposter/accounts">
+                      <button class="btn btn-quiet" type="submit">Revoke Client Access</button>
+                    </form>
+                  <% } %>
+                  <a class="danger-link" href="/disconnect/tiktok?returnTo=%2Fprivate%2Fautoposter%2Faccounts">Remove TikTok</a>
+                <% } %>
+              </section>
+
+              <% if ((youtubeChannels || []).length > 0) { %>
+                <section>
+                  <h2>YouTube</h2>
+                  <% youtubeChannels.forEach((channel) => { %>
+                    <div class="managed-channel">
+                      <strong><%= channel.displayName || channel.username || 'YouTube channel' %></strong>
+                      <span>Private uploads</span>
+                      <% if (channel.connectionStatus === 'reauthorization_required') { %>
+                        <a href="/connect/youtube?reauthorize=<%= encodeURIComponent(channel.accountId) %>&amp;returnTo=%2Fprivate%2Fautoposter%2Faccounts">Reauthorize</a>
+                      <% } %>
+                      <% if (channel.connectionStatus !== 'disconnected') { %>
+                        <form action="/disconnect/youtube" method="post" onsubmit="return confirm('Disconnect this YouTube channel?');">
+                          <input type="hidden" name="accountId" value="<%= channel.accountId %>">
+                          <input type="hidden" name="returnTo" value="/private/autoposter/accounts">
+                          <button class="danger-link" type="submit">Disconnect</button>
+                        </form>
+                      <% } %>
+                    </div>
+                  <% }) %>
+                </section>
+              <% } %>
+
+              <section>
+                <h2>Settings</h2>
+                <dl>
+                  <div><dt>Plan</dt><dd><%= plan.displayName || 'Unavailable' %></dd></div>
+                  <div><dt>Scheduled</dt><dd><%= usage.scheduledPosts ? usage.scheduledPosts.used : 0 %></dd></div>
+                  <div><dt>Accounts</dt><dd><%= usage.connectedAccounts ? usage.connectedAccounts.used : 0 %></dd></div>
+                </dl>
+                <% if (enableInstagram) { %>
+                  <div class="managed-channel">
+                    <strong>Instagram</strong>
+                    <span><%= instagramStatus && instagramStatus.connected ? 'Connected' : 'Not connected' %></span>
+                  </div>
+                <% } %>
+              </section>
+            </div>
+          </details>
+        </section>
+      <% } %>
+    </main>
+  </div>
+</body>
+</html>
