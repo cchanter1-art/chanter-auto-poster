@@ -30,12 +30,12 @@
             <% if (item.href) { %>
               <a class="module-list-item" href="<%= item.href %>">
                 <strong><%= item.title %></strong>
-                <span><%= state.label %></span>
+                <span><%= item.queueLabel || state.label %></span>
               </a>
             <% } else { %>
               <div class="module-list-item">
                 <strong><%= item.title %></strong>
-                <span><%= state.label %></span>
+                <span><%= item.queueLabel || state.label %></span>
               </div>
             <% } %>
           <% }); %>

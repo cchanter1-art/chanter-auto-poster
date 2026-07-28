@@ -269,22 +269,60 @@ function autoPosterWorkItems(work) {
   });
 }
 
+const ACTIVE_AUTOPOSTER_QUEUE_STATUSES = new Set(['pending', 'scheduled', 'ready', 'processing']);
+
+async function autoPosterQueueItems(req, owned) {
+  // Preserve the archive boundary explicitly: archived work is history-only,
+  // while non-completed work retains the existing live Queue projection.
+  const items = owned.filter(
+    (item) => !item.archived && item.state !== platformStatus.WORK_STATE.COMPLETED
+  );
+  let unavailable = false;
+  for (const item of owned) {
+    if (item.archived || item.state !== platformStatus.WORK_STATE.COMPLETED) continue;
+    // `completed` is the batch review lifecycle, not provider execution truth.
+    // Reopen that exact bounded batch before showing it in Queue: approved
+    // scheduled/processing items stay queued, while terminal posted history
+    // remains Activity-only. A failed read never guesses that work is queued.
+    if (!item.workId || !item.href) continue;
+    try {
+      const view = await batchService.getBatchView(
+        websiteContext(req),
+        item.workId,
+        { autoResume: false }
+      );
+      const activeStatuses = (view.items || [])
+        .filter((batchItem) => batchItem.approved)
+        .map((batchItem) => String(batchItem.status || '').trim())
+        .filter((status) => ACTIVE_AUTOPOSTER_QUEUE_STATUSES.has(status));
+      if (activeStatuses.length > 0) {
+        items.push({
+          ...item,
+          queueLabel: activeStatuses.includes('processing') ? 'Running' : 'Scheduled'
+        });
+      }
+    } catch {
+      unavailable = true;
+    }
+  }
+  return { items, unavailable };
+}
+
 function renderAutoPosterList(mode) {
   return asyncRoute(async (req, res) => {
     const work = await loadPlatformWork(req);
     const owned = autoPosterWorkItems(work);
     const queueMode = mode === 'queue';
-    const items = queueMode
-      ? owned.filter((item) =>
-        !item.archived && item.state !== platformStatus.WORK_STATE.COMPLETED)
-      : owned.filter((item) => item.evidenceAvailable);
+    const queue = queueMode
+      ? await autoPosterQueueItems(req, owned)
+      : { items: owned.filter((item) => item.evidenceAvailable), unavailable: false };
     res.render('platform-autoposter-list', {
       appName: config.appName,
       active: mode,
       mode,
-      items,
+      items: queue.items,
       platformStatus,
-      unavailable: Boolean(work.error)
+      unavailable: Boolean(work.error || queue.unavailable)
     });
   });
 }

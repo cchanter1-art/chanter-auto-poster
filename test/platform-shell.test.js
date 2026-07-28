@@ -209,10 +209,21 @@ function shellChrome(html) {
 
 test('platform shell serves six canonical surfaces with separated boundaries', async (t) => {
   const originalListBatches = batchService.listBatches;
+  const originalGetBatchView = batchService.getBatchView;
   batchService.listBatches = async () => ({ batches: BATCH_RECORDS });
+  batchService.getBatchView = async (context, batchId) => ({
+    batch: BATCH_RECORDS.find((record) => record.batchId === batchId),
+    items: batchId === 'batch-donee-0004'
+      ? [
+          { id: 'scheduled-1', approved: true, status: 'scheduled' },
+          { id: 'scheduled-2', approved: true, status: 'scheduled' }
+        ]
+      : []
+  });
   const server = await startServer();
   t.after(() => {
     batchService.listBatches = originalListBatches;
+    batchService.getBatchView = originalGetBatchView;
     server.close();
   });
 
@@ -299,6 +310,46 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   assert.ok(!storageCard.includes('Reachable'), 'an unconfigured probe must not read as reachable');
   assert.ok(pages['/platform/health'].includes('data-health="approval"'));
   assert.ok(pages['/platform/health'].includes('Approval required'));
+});
+
+test('Queue keeps completed-review batches only while approved items remain actively scheduled', async (t) => {
+  const originalListBatches = batchService.listBatches;
+  const originalGetBatchView = batchService.getBatchView;
+  let itemStatus = 'scheduled';
+  batchService.listBatches = async () => ({
+    batches: [BATCH_RECORDS.find((record) => record.batchId === 'batch-donee-0004')]
+  });
+  batchService.getBatchView = async () => ({
+    batch: BATCH_RECORDS.find((record) => record.batchId === 'batch-donee-0004'),
+    items: [
+      { id: 'queue-item-1', approved: true, status: itemStatus },
+      { id: 'queue-item-2', approved: true, status: itemStatus }
+    ]
+  });
+  const server = await startServer();
+  t.after(() => {
+    batchService.listBatches = originalListBatches;
+    batchService.getBatchView = originalGetBatchView;
+    server.close();
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const scheduledQueue = await fetch(`${baseUrl}/platform/autoposter/queue`);
+  assert.equal(scheduledQueue.status, 200);
+  const scheduledHtml = await scheduledQueue.text();
+  assert.match(scheduledHtml, /Batch batch-do/);
+  assert.match(scheduledHtml, />Scheduled</);
+
+  const activity = await fetch(`${baseUrl}/platform/autoposter/activity`);
+  assert.equal(activity.status, 200);
+  const activityHtml = await activity.text();
+  assert.match(activityHtml, /Batch batch-do/);
+  assert.match(activityHtml, />Completed</);
+
+  itemStatus = 'posted';
+  const terminalQueue = await fetch(`${baseUrl}/platform/autoposter/queue`);
+  assert.equal(terminalQueue.status, 200);
+  assert.match(await terminalQueue.text(), /Nothing queued/);
 });
 
 test('the platform shell and customer composer are English-only', async (t) => {

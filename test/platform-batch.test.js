@@ -13,10 +13,13 @@ process.env.PLATFORM_CANONICAL_EXECUTION_ENABLED = 'false';
 // covered separately in batch-storage.test.js.
 
 const assert = require('node:assert/strict');
+const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const express = require('express');
+const { chromium } = require('playwright-core');
 const { createCommercialFixture } = require('./helpers/commercial-fixture');
 const mediaPolicy = require('../src/mediaPolicy');
 const { postFromDoc } = require('../src/postsMapper');
@@ -948,5 +951,444 @@ test('authenticated Platform HTTP mission persists through review, acceptance, r
     approvedCount: reopened.items.filter((item) => item.approved).length,
     duplicatePostCount: world.posts.length - 2,
     providerPublishCalls: 0
+  }));
+});
+
+test('real Chrome customer mission persists, replays safely, and recovers from a disconnected destination', {
+  timeout: 90_000
+}, async (t) => {
+  const chromeExecutable = [
+    process.env.CHROME_PATH,
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser'
+  ].filter(Boolean).find((candidate) => fsSync.existsSync(candidate));
+  assert.ok(chromeExecutable, 'A local Chrome/Chromium executable is required for the browser mission.');
+
+  const world = makeWorld();
+  const batchServiceModule = require('../src/batchService');
+  const auth = require('../src/auth');
+  const delegatedMethods = [
+    'createBatch',
+    'getBatchView',
+    'listBatches',
+    'listDestinations',
+    'listSeries',
+    'getComposerCapabilities',
+    'resumePreparation',
+    'updateItem',
+    'changeItemDestination',
+    'acceptItems'
+  ];
+  const originals = Object.fromEntries(
+    delegatedMethods.map((name) => [name, batchServiceModule[name]])
+  );
+  for (const name of delegatedMethods) {
+    batchServiceModule[name] = (...args) => world.batchService[name](...args);
+  }
+  t.after(() => {
+    for (const [name, implementation] of Object.entries(originals)) {
+      batchServiceModule[name] = implementation;
+    }
+  });
+
+  const platformRoutes = require('../src/platformRoutes');
+  const app = express();
+  app.set('view engine', 'ejs');
+  app.set('views', path.join(__dirname, '..', 'src', 'views'));
+  app.use(auth.attachUser);
+  app.use(auth.csrfOriginCheck);
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+  app.use(platformRoutes);
+  app.use((error, req, res, next) => {
+    if (!error) {
+      next();
+      return;
+    }
+    res.status(error.status || 500).json({
+      ok: false,
+      code: error.code || 'mission_browser_error',
+      reason: error.message || 'Browser mission request failed.'
+    });
+  });
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const authCookie = {
+    name: auth.ADMIN_SESSION_COOKIE,
+    value: auth.createAdminSessionToken(),
+    url: baseUrl,
+    httpOnly: true,
+    sameSite: 'Lax'
+  };
+
+  const evidenceDir = path.join(__dirname, 'evidence', 'platform-customer-mission-p1');
+  await fs.mkdir(evidenceDir, { recursive: true });
+  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chanter-platform-p1-'));
+  const fixturePaths = [
+    path.join(fixtureDir, 'browser-mission-a.mp4'),
+    path.join(fixtureDir, 'browser-mission-b.mp4')
+  ];
+  await Promise.all(fixturePaths.map((filePath, index) =>
+    fs.writeFile(filePath, Buffer.from(`deterministic-browser-video-${index + 1}`))
+  ));
+  t.after(async () => {
+    for (const filePath of fixturePaths) {
+      await fs.unlink(filePath).catch((error) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    }
+    await fs.rmdir(fixtureDir).catch((error) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    const uploadedPaths = world.calls.add
+      .flatMap((call) => call.files || [])
+      .map((file) => file && file.path)
+      .filter(Boolean);
+    for (const filePath of uploadedPaths) {
+      await fs.unlink(filePath).catch((error) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    }
+  });
+
+  const browser = await chromium.launch({
+    executablePath: chromeExecutable,
+    headless: true
+  });
+  t.after(() => browser.close());
+
+  const consoleErrors = [];
+  const requestFailures = [];
+  const unexpectedHttpFailures = [];
+  const externalRequests = [];
+  function observePage(page, { allowDestinationUnavailable = false } = {}) {
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+    page.on('pageerror', (error) => consoleErrors.push(error.message));
+    page.on('requestfailed', (request) => {
+      requestFailures.push({
+        url: request.url(),
+        reason: request.failure() && request.failure().errorText
+      });
+    });
+    page.on('response', (response) => {
+      if (response.status() < 400) return;
+      const expectedDestinationFailure =
+        allowDestinationUnavailable &&
+        response.status() === 409 &&
+        response.url().endsWith('/api/platform/batches');
+      if (!expectedDestinationFailure) {
+        unexpectedHttpFailures.push({ url: response.url(), status: response.status() });
+      }
+    });
+  }
+  async function isolateNetwork(context) {
+    await context.route(/^https?:\/\/.*/, async (route) => {
+      const requestUrl = new URL(route.request().url());
+      if (requestUrl.hostname === '127.0.0.1') {
+        await route.continue();
+        return;
+      }
+      if (requestUrl.hostname === 'cdn.example.com') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'video/mp4',
+          body: Buffer.from('deterministic-local-media-response')
+        });
+        return;
+      }
+      externalRequests.push(route.request().url());
+      await route.abort('blockedbyclient');
+    });
+  }
+  async function createContext(intakeKey) {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 1000 },
+      timezoneId: 'UTC'
+    });
+    await context.addInitScript((stableIntakeKey) => {
+      Object.defineProperty(window.crypto, 'randomUUID', {
+        configurable: true,
+        value: () => stableIntakeKey
+      });
+    }, intakeKey);
+    await context.addCookies([authCookie]);
+    await isolateNetwork(context);
+    return context;
+  }
+  async function fillComposer(page, files = fixturePaths) {
+    await page.goto(`${baseUrl}/platform/autoposter/compose`, { waitUntil: 'networkidle' });
+    assert.equal(page.url(), `${baseUrl}/platform/autoposter/compose`);
+    await page.setInputFiles('#file-input', files);
+    await page.locator('#compose-workflow:not(.hidden)').waitFor();
+    await page.fill('#startDate', '2026-08-01');
+    await page.fill('#startTime', '09:00');
+    await page.fill('#caption', 'Customer browser mission caption');
+    await page.locator('#customer-options > summary').click();
+    await page.fill('#hashtags', '#chanter #browser');
+    await page.check('.destination-checkbox[data-account-id="account-a"]');
+    await page.waitForFunction(() => !document.getElementById('submit-btn').disabled);
+  }
+
+  const context = await createContext('customer-browser-mission-proof-1');
+  t.after(() => context.close());
+  const page = await context.newPage();
+  observePage(page);
+  await fillComposer(page);
+  await page.evaluate(() => {
+    const spoofed = {
+      userId: 'browser-spoofed-owner',
+      workspaceId: 'browser-spoofed-workspace',
+      status: 'posted',
+      approved: 'true'
+    };
+    for (const [name, value] of Object.entries(spoofed)) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      document.getElementById('compose-form').appendChild(input);
+    }
+  });
+  await page.screenshot({
+    path: path.join(evidenceDir, '01-composer-before-submit.png'),
+    fullPage: true
+  });
+
+  await Promise.all([
+    page.waitForURL(/\/platform\/autoposter\/compose\/batch-[a-f0-9]+$/),
+    page.click('#submit-btn')
+  ]);
+  const reviewUrl = page.url();
+  const batchId = reviewUrl.split('/').pop();
+  assert.match(batchId, /^batch-[a-f0-9]+$/);
+  assert.equal(world.posts.length, 2);
+  assert.ok(world.posts.every((post) => post.userId === 'owner'));
+  assert.ok(world.posts.every((post) => post.workspaceId !== 'browser-spoofed-workspace'));
+  assert.ok(world.posts.every((post) => post.accountId === 'account-a'));
+  assert.ok(world.posts.every((post) => post.caption === 'Customer browser mission caption'));
+  assert.deepEqual(
+    world.posts.map((post) => post.scheduledAt),
+    ['2026-08-01T09:00:00.000Z', '2026-08-01T09:30:00.000Z']
+  );
+  assert.ok(world.posts.every((post) => post.status === 'scheduled' && !post.approved));
+
+  await page.locator('.item-card').first().waitFor();
+  assert.equal(await page.locator('.item-card').count(), 2);
+  const preparation = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/platform/batches/${encodeURIComponent(id)}/prepare`, {
+      method: 'POST',
+      headers: { Accept: 'application/json' }
+    });
+    return { status: response.status, payload: await response.json() };
+  }, batchId);
+  assert.equal(preparation.status, 200);
+  assert.equal(preparation.payload.ok, true);
+  await Promise.all([
+    page.waitForResponse((response) =>
+      response.request().method() === 'GET' &&
+      response.url().endsWith(`/api/platform/batches/${batchId}`)
+    ),
+    page.click('#refresh-btn')
+  ]);
+  await page.waitForFunction(() => {
+    const cards = Array.from(document.querySelectorAll('.item-card'));
+    return cards.length === 2 &&
+      cards.every((card) => card.querySelector('.accept-btn:not([disabled])'));
+  });
+  const readyView = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/platform/batches/${encodeURIComponent(id)}`, {
+      headers: { Accept: 'application/json' }
+    });
+    return response.json();
+  }, batchId);
+  assert.equal(readyView.batch.status, 'ready');
+  assert.deepEqual(readyView.items.map((item) => item.id), ['post-1', 'post-2']);
+  assert.ok(readyView.items.every((item) => item.readyToAccept));
+  await page.screenshot({
+    path: path.join(evidenceDir, '02-exact-batch-review-ready.png'),
+    fullPage: true
+  });
+
+  const acceptResponsePromise = page.waitForResponse((response) =>
+    response.request().method() === 'POST' &&
+    response.url().endsWith(`/api/platform/batches/${batchId}/accept-all`)
+  );
+  await page.click('#accept-all-btn');
+  const acceptResponse = await acceptResponsePromise;
+  const acceptPayload = await acceptResponse.json();
+  assert.equal(acceptResponse.status(), 200);
+  assert.equal(acceptPayload.accepted.length, 2);
+  assert.deepEqual(acceptPayload.failed, []);
+  await page.waitForFunction(() => {
+    const cards = Array.from(document.querySelectorAll('.item-card'));
+    return document.querySelector('.chip-completed') &&
+      cards.length === 2 &&
+      cards.every((card) => card.classList.contains('accepted'));
+  });
+  await page.screenshot({
+    path: path.join(evidenceDir, '03-after-accept-all.png'),
+    fullPage: true
+  });
+
+  const repeatedAccept = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/platform/batches/${encodeURIComponent(id)}/accept-all`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    return response.json();
+  }, batchId);
+  assert.deepEqual(repeatedAccept.accepted, []);
+  assert.equal(world.calls.approve.length, 2);
+
+  await page.reload({ waitUntil: 'networkidle' });
+  assert.equal(page.url(), reviewUrl);
+  await page.locator('.item-card').first().waitFor();
+  assert.equal(await page.locator('.item-card').count(), 2);
+  const refreshedItemIds = await page.locator('.item-card').evaluateAll((cards) =>
+    cards.map((card) => card.dataset.postId)
+  );
+  assert.deepEqual(refreshedItemIds, ['post-1', 'post-2']);
+  const refreshedView = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/platform/batches/${encodeURIComponent(id)}`, {
+      headers: { Accept: 'application/json' }
+    });
+    return response.json();
+  }, batchId);
+  assert.equal(refreshedView.batch.status, 'completed');
+  assert.ok(refreshedView.items.every((item) =>
+    item.approved &&
+    item.status === 'scheduled' &&
+    item.caption === 'Customer browser mission caption' &&
+    item.accountId === 'account-a'
+  ));
+  assert.deepEqual(
+    refreshedView.items.map((item) => item.scheduledAt),
+    ['2026-08-01T09:00:00.000Z', '2026-08-01T09:30:00.000Z']
+  );
+  await page.screenshot({
+    path: path.join(evidenceDir, '04-after-refresh.png'),
+    fullPage: true
+  });
+
+  await fillComposer(page);
+  await Promise.all([
+    page.waitForURL(new RegExp(`/platform/autoposter/compose/${batchId}$`)),
+    page.click('#submit-btn')
+  ]);
+  assert.equal(page.url(), reviewUrl);
+  assert.equal(world.posts.length, 2);
+  assert.equal(world.calls.approve.length, 2);
+
+  await page.goto(`${baseUrl}/platform/autoposter/queue`, { waitUntil: 'networkidle' });
+  const queueText = await page.locator('main').innerText();
+  assert.match(queueText, new RegExp(`Batch ${batchId.slice(0, 8)}`));
+  assert.match(queueText, /Scheduled/);
+  await page.screenshot({
+    path: path.join(evidenceDir, '05-queue.png'),
+    fullPage: true
+  });
+
+  await page.goto(`${baseUrl}/platform/autoposter/activity`, { waitUntil: 'networkidle' });
+  const activityText = await page.locator('main').innerText();
+  assert.match(activityText, new RegExp(`Batch ${batchId.slice(0, 8)}`));
+  assert.match(activityText, /Completed/);
+  await page.screenshot({
+    path: path.join(evidenceDir, '06-activity.png'),
+    fullPage: true
+  });
+
+  await page.goto(reviewUrl, { waitUntil: 'networkidle' });
+  await page.locator('.item-card').first().waitFor();
+  assert.equal(await page.locator('.item-card').count(), 2);
+  assert.equal(world.posts.length, 2);
+
+  const blockedContext = await createContext('customer-browser-mission-blocked');
+  t.after(() => blockedContext.close());
+  const blockedPage = await blockedContext.newPage();
+  observePage(blockedPage, { allowDestinationUnavailable: true });
+  await fillComposer(blockedPage, [fixturePaths[0]]);
+  await blockedPage.evaluate(() => {
+    const connected = document.querySelector('.destination-checkbox[data-account-id="account-a"]');
+    connected.value = 'tiktok|account-not-connected';
+    connected.dataset.accountId = 'account-not-connected';
+  });
+  await Promise.all([
+    blockedPage.waitForResponse((response) =>
+      response.status() === 409 &&
+      response.url().endsWith('/api/platform/batches')
+    ),
+    blockedPage.click('#submit-btn')
+  ]);
+  await blockedPage.locator('#notice:not(.hidden)').waitFor();
+  const blockedNotice = await blockedPage.locator('#notice').innerText();
+  assert.match(blockedNotice, /Could not schedule 1 item\./);
+  assert.match(blockedNotice, /not connected and publishing-ready/);
+  assert.equal(blockedPage.url(), `${baseUrl}/platform/autoposter/compose`);
+  assert.equal(await blockedPage.locator('#success-state:not(.hidden)').count(), 0);
+  assert.equal(world.posts.length, 2);
+  assert.equal(world.batchRecords.size, 1);
+  await blockedPage.screenshot({
+    path: path.join(evidenceDir, '07-disconnected-destination-error.png'),
+    fullPage: true
+  });
+  await blockedPage.evaluate(() => {
+    const connected = document.querySelector('.destination-checkbox[data-account-id="account-not-connected"]');
+    connected.value = 'tiktok|account-a';
+    connected.dataset.accountId = 'account-a';
+    connected.checked = true;
+    connected.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await blockedPage.waitForFunction(() => !document.getElementById('submit-btn').disabled);
+
+  assert.ok(world.posts.every((post) => post.postedAt == null));
+  assert.ok(world.posts.every((post) => post.status === 'scheduled'));
+  const expectedRecoveryConsoleErrors = consoleErrors.filter((message) =>
+    /status of 409 \(Conflict\)/.test(message)
+  );
+  const unexpectedConsoleErrors = consoleErrors.filter((message) =>
+    !/status of 409 \(Conflict\)/.test(message)
+  );
+  assert.equal(expectedRecoveryConsoleErrors.length, 1);
+  assert.deepEqual(unexpectedConsoleErrors, []);
+  assert.deepEqual(requestFailures, []);
+  assert.deepEqual(unexpectedHttpFailures, []);
+  assert.deepEqual(externalRequests, []);
+  console.log('[PLATFORM_CUSTOMER_BROWSER_EVIDENCE]', JSON.stringify({
+    browser: 'system Chrome via playwright-core',
+    finalUrl: reviewUrl,
+    batchId,
+    itemIds: world.posts.map((post) => post.id),
+    destinationIds: [...new Set(world.posts.map((post) => post.accountId))],
+    scheduledAt: world.posts.map((post) => post.scheduledAt),
+    caption: 'Customer browser mission caption',
+    finalBatchStatus: refreshedView.batch.status,
+    finalItemStatuses: refreshedView.items.map((item) => item.status),
+    approvedCount: refreshedView.items.filter((item) => item.approved).length,
+    duplicateItemCount: world.posts.length - 2,
+    duplicateApprovalCount: world.calls.approve.length - 2,
+    providerPublishCalls: 0,
+    postedAtValues: world.posts.map((post) => post.postedAt || null),
+    expectedRecoveryConsoleErrors,
+    unexpectedConsoleErrors,
+    requestFailures,
+    unexpectedHttpFailures,
+    externalRequests,
+    screenshots: [
+      '01-composer-before-submit.png',
+      '02-exact-batch-review-ready.png',
+      '03-after-accept-all.png',
+      '04-after-refresh.png',
+      '05-queue.png',
+      '06-activity.png',
+      '07-disconnected-destination-error.png'
+    ]
   }));
 });
