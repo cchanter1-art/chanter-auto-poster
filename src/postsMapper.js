@@ -195,6 +195,15 @@ function toIsoOrNull(value) {
 // Platform batch preparation lifecycle: a closed allowlist projection so
 // whatever lands in the document, only these safe fields reach app/UI code.
 const PREPARATION_STATUSES = new Set(['pending', 'running', 'succeeded', 'failed']);
+const DISPATCH_OPERATION_STATES = new Set([
+  'claimed',
+  'dispatching',
+  'succeeded',
+  'failed_retryable',
+  'failed_terminal',
+  'outcome_unknown',
+  'abandoned_pre_provider'
+]);
 
 function sanitizePreparation(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -208,6 +217,31 @@ function sanitizePreparation(raw) {
     provider: typeof raw.provider === 'string' ? raw.provider.slice(0, 40) : '',
     fallbackUsed: Boolean(raw.fallbackUsed),
     error: typeof raw.error === 'string' ? scrubEvidenceText(raw.error, 500) : ''
+  };
+}
+
+function sanitizeDispatchOperation(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const operationId = String(raw.operationId || '').trim().toLowerCase();
+  const state = String(raw.state || '').trim().toLowerCase();
+  const provider = String(raw.provider || '').trim().toLowerCase();
+  const attemptNumber = Number(raw.attemptNumber);
+  if (
+    !/^[a-f0-9]{64}$/.test(operationId)
+    || !DISPATCH_OPERATION_STATES.has(state)
+    || !Number.isSafeInteger(attemptNumber)
+    || attemptNumber < 1
+  ) return null;
+  return {
+    version: Number(raw.version || 1),
+    operationId,
+    attemptNumber,
+    provider,
+    state,
+    claimedAt: toIsoOrNull(raw.claimedAt),
+    startedAt: toIsoOrNull(raw.startedAt),
+    completedAt: toIsoOrNull(raw.completedAt),
+    providerMutationStarted: Boolean(raw.providerMutationStarted)
   };
 }
 
@@ -385,6 +419,9 @@ function postFromDoc(doc) {
     // 'uploaded_private'). '' means the provider reported nothing.
     providerStatus: data.providerStatus || '',
     providerVerification: sanitizeProviderVerification(data.providerVerification),
+    // Stable, secret-free scheduler operation evidence. The allowlist keeps
+    // worker internals and provider credentials out of customer projections.
+    dispatchOperation: sanitizeDispatchOperation(data.dispatchOperation),
     // Safe provider-operation projection. The raw Firestore envelope may
     // contain the encrypted resumable-session locator; this mapper delegates
     // to a closed allowlist that never returns that field.
@@ -529,6 +566,7 @@ module.exports = {
   sanitizeProviderResponse,
   sanitizePostResult,
   sanitizeProviderVerification,
+  sanitizeDispatchOperation,
   sanitizeHistory,
   sanitizePreparation,
   postFromDoc,

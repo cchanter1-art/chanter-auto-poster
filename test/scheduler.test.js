@@ -75,6 +75,18 @@ test('cron tick atomically publishes a due scheduled Firestore job', async (t) =
     createdAt: timestamp('2026-06-20T07:00:00.000Z'),
     updatedAt: timestamp('2026-06-20T07:00:00.000Z'),
     claimAttempts: 0
+  }], ['future-job', {
+    userId: 'owner',
+    platform: 'tiktok',
+    accountId: 'account-future',
+    tiktokOpenId: 'account-future',
+    status: 'scheduled',
+    scheduledAt: timestamp('2026-06-20T12:01:00.000Z'),
+    approvedAt: timestamp('2026-06-20T10:30:00.000Z'),
+    approvedBy: 'admin:owner',
+    createdAt: timestamp('2026-06-20T10:00:00.000Z'),
+    updatedAt: timestamp('2026-06-20T10:00:00.000Z'),
+    claimAttempts: 0
   }]]);
   const queries = [];
   const logs = [];
@@ -84,6 +96,7 @@ test('cron tick atomically publishes a due scheduled Firestore job', async (t) =
 
   const document = (id) => ({
     id,
+    ref: { id },
     get exists() { return records.has(id); },
     data: () => records.get(id)
   });
@@ -193,11 +206,18 @@ test('cron tick atomically publishes a due scheduled Firestore job', async (t) =
   });
 
   const scheduler = require('../src/scheduler');
+  const boundedSelection = await scheduler._private.findDueJobs(timestamp(fixedNow), 2);
+  assert.deepEqual(
+    boundedSelection.map((job) => job.id),
+    ['unapproved-due-job', 'instagram-job'],
+    'the exact ordered due query is bounded before any claim'
+  );
   const result = await scheduler.runSchedulerTick({ now: fixedNow, batchSize: 10 });
 
   assert.deepEqual(result, {
     ok: true,
     now: fixedNow.toISOString(),
+    batchSize: 10,
     checked: 4,
     due: 4,
     posted: 1,
@@ -217,11 +237,16 @@ test('cron tick atomically publishes a due scheduled Firestore job', async (t) =
   assert.equal(records.get('due-job').status, 'posted');
   assert.equal(records.get('due-job').lockedBy, null);
   assert.equal(records.get('due-job').claimAttempts, 1);
+  assert.match(records.get('due-job').dispatchOperation.operationId, /^[a-f0-9]{64}$/);
+  assert.equal(records.get('due-job').dispatchOperation.state, 'succeeded');
+  assert.equal(records.get('due-job').dispatchOperation.providerMutationStarted, true);
   // Approval gate: the due-but-unapproved draft is untouched — never
   // claimed, never published, no attempt recorded, not marked failed.
   assert.equal(records.get('unapproved-due-job').status, 'scheduled');
   assert.equal(records.get('unapproved-due-job').claimAttempts, 0);
   assert.equal(records.get('unapproved-due-job').lockedBy, undefined);
+  assert.equal(records.get('future-job').status, 'scheduled');
+  assert.equal(records.get('future-job').claimAttempts, 0);
   assert.equal(records.get('legacy-job').status, 'failed');
   assert.match(records.get('legacy-job').errorMessage, /unassigned/i);
   assert.equal(records.get('instagram-job').status, 'failed');
@@ -236,6 +261,10 @@ test('cron tick atomically publishes a due scheduled Firestore job', async (t) =
     query.filters.some((filter) => filter.field === 'scheduledAt' && filter.operator === '<=') &&
     query.orderField === 'scheduledAt'
   ));
+  assert.ok(queries.some((query) => query.limit === 2));
+  const repeated = await scheduler.runSchedulerTick({ now: fixedNow, batchSize: 10 });
+  assert.equal(repeated.posted, 0);
+  assert.equal(publishedJobs.length, 1, 'repeated ticks never redispatch terminal success');
   for (const marker of ['[CRON_TICK]', '[CRON_QUERY]', '[JOB_FOUND]', '[JOB_DUE]', '[POST_START]', '[POST_SUCCESS]']) {
     assert.ok(logs.some((line) => line.includes(marker)), `missing log marker ${marker}`);
   }
@@ -261,6 +290,7 @@ function createSchedulerHarness(t, { record, publishResult }) {
 
   const document = (id) => ({
     id,
+    ref: { id },
     get exists() { return records.has(id); },
     data: () => records.get(id)
   });
@@ -272,13 +302,35 @@ function createSchedulerHarness(t, { record, publishResult }) {
     }
     records.set(id, next);
   };
+  const createQuery = (filters = []) => ({
+    where(field, operator, value) {
+      return createQuery([...filters, { field, operator, value }]);
+    },
+    async get() {
+      const docs = [...records.keys()].map(document).filter((doc) =>
+        filters.every((filter) => {
+          const value = doc.data()[filter.field];
+          if (filter.operator === '==') return value === filter.value;
+          if (filter.operator === '<=') {
+            return value && typeof value.toMillis === 'function'
+              && value.toMillis() <= filter.value.toMillis();
+          }
+          return false;
+        })
+      );
+      return { docs };
+    }
+  });
 
   require.cache[firestorePath] = {
     id: firestorePath,
     filename: firestorePath,
     loaded: true,
     exports: {
-      postsCollection: () => ({ doc: (id) => ({ id }) }),
+      postsCollection: () => ({
+        doc: (id) => ({ id }),
+        where: (...args) => createQuery().where(...args)
+      }),
       getFirestore: () => ({
         runTransaction: async (callback) => callback({
           get: async (documentRef) => document(documentRef.id),
@@ -426,6 +478,7 @@ test('transient publish failure reschedules with bounded backoff instead of fail
   assert.equal(record.failedAt, null);
   assert.equal(record.claimAttempts, 1);
   assert.equal(record.lastResult.willRetry, true);
+  assert.equal(record.dispatchOperation.state, 'failed_retryable');
   // First retry backs off by exactly one minute (deterministic schedule).
   const delayMs = record.scheduledAt.toMillis() - before;
   assert.ok(delayMs >= 60_000 && delayMs <= 61_000, `unexpected backoff delay ${delayMs}`);
@@ -445,6 +498,7 @@ test('non-retryable publish failure is still marked failed', async (t) => {
   assert.equal(record.status, 'failed');
   assert.ok(record.failedAt);
   assert.equal(record.errorMessage, 'TikTok video init returned HTTP 400');
+  assert.equal(record.dispatchOperation.state, 'failed_terminal');
 });
 
 test('transient failure at max claim attempts becomes terminal failed', async (t) => {
@@ -462,6 +516,7 @@ test('transient failure at max claim attempts becomes terminal failed', async (t
   assert.equal(record.claimAttempts, 5);
   assert.equal(record.status, 'failed');
   assert.ok(record.failedAt);
+  assert.equal(record.dispatchOperation.state, 'failed_terminal');
 });
 
 test('duplicate-publish protection still refuses jobs with a durable publishId', async (t) => {
@@ -480,6 +535,109 @@ test('duplicate-publish protection still refuses jobs with a durable publishId',
   assert.equal(publishCalls.length, 0);
   assert.equal(records.get('job-1').status, 'posted');
   assert.equal(records.get('job-1').publishId, 'publish-123');
+});
+
+test('dispatch operation identity is stable for one approval attempt and changes across authority or attempts', () => {
+  const { createDispatchOperation } = require('../src/scheduler')._private;
+  const now = new Date('2026-06-20T12:00:00.000Z');
+  const record = dueTikTokRecord();
+  const first = createDispatchOperation('job-1', record, 1, now);
+  const replay = createDispatchOperation('job-1', record, 1, now);
+  const nextAttempt = createDispatchOperation('job-1', record, 2, now);
+  const newApproval = createDispatchOperation(
+    'job-1',
+    dueTikTokRecord({
+      approvedAt: {
+        toDate: () => new Date('2026-06-20T11:00:00.000Z'),
+        toMillis: () => Date.parse('2026-06-20T11:00:00.000Z')
+      }
+    }),
+    1,
+    now
+  );
+
+  assert.equal(first.operationId, replay.operationId);
+  assert.notEqual(first.operationId, nextAttempt.operationId);
+  assert.notEqual(first.operationId, newApproval.operationId);
+  assert.match(first.operationId, /^[a-f0-9]{64}$/);
+});
+
+test('expired pre-provider lease is safely recoverable without a provider call', async (t) => {
+  const timestamp = (value) => ({
+    toDate: () => new Date(value),
+    toMillis: () => Date.parse(value)
+  });
+  const { scheduler, records, publishCalls } = createSchedulerHarness(t, {
+    record: dueTikTokRecord({
+      status: 'processing',
+      claimAttempts: 1,
+      lockedAt: timestamp('2026-06-20T11:00:00.000Z'),
+      lockedBy: 'stopped-worker',
+      dispatchOperation: {
+        version: 1,
+        operationId: 'a'.repeat(64),
+        attemptNumber: 1,
+        provider: 'tiktok',
+        state: 'claimed',
+        claimedAt: timestamp('2026-06-20T11:00:00.000Z'),
+        startedAt: null,
+        completedAt: null,
+        providerMutationStarted: false
+      }
+    }),
+    publishResult: { ok: true, mode: 'api', response: { data: { publish_id: 'must-not-run' } } }
+  });
+
+  await scheduler._private.reclaimStaleLocks(new Date('2026-06-20T12:00:00.000Z'));
+  const record = records.get('job-1');
+  assert.equal(record.status, 'scheduled');
+  assert.equal(record.lockedAt, null);
+  assert.equal(record.lockedBy, null);
+  assert.equal(record.dispatchOperation.state, 'abandoned_pre_provider');
+  assert.equal(record.dispatchOperation.providerMutationStarted, false);
+  assert.equal(publishCalls.length, 0);
+});
+
+test('expired in-provider lease becomes outcome_unknown and never blind-redispatches', async (t) => {
+  const timestamp = (value) => ({
+    toDate: () => new Date(value),
+    toMillis: () => Date.parse(value)
+  });
+  const { scheduler, records, publishCalls } = createSchedulerHarness(t, {
+    record: dueTikTokRecord({
+      status: 'processing',
+      claimAttempts: 1,
+      lockedAt: timestamp('2026-06-20T11:00:00.000Z'),
+      lockedBy: 'stopped-worker',
+      dispatchOperation: {
+        version: 1,
+        operationId: 'b'.repeat(64),
+        attemptNumber: 1,
+        provider: 'tiktok',
+        state: 'dispatching',
+        claimedAt: timestamp('2026-06-20T11:00:00.000Z'),
+        startedAt: timestamp('2026-06-20T11:00:01.000Z'),
+        completedAt: null,
+        providerMutationStarted: true
+      }
+    }),
+    publishResult: { ok: true, mode: 'api', response: { data: { publish_id: 'must-not-run' } } }
+  });
+
+  await scheduler._private.reclaimStaleLocks(new Date('2026-06-20T12:00:00.000Z'));
+  const record = records.get('job-1');
+  assert.equal(record.status, 'outcome_unknown');
+  assert.equal(record.providerStatus, 'provider_reconciliation_required');
+  assert.equal(record.dispatchOperation.state, 'outcome_unknown');
+  assert.equal(record.lastResult.code, 'PROVIDER_DISPATCH_OUTCOME_UNKNOWN');
+  assert.equal(record.lastResult.outcomeUnknown, true);
+
+  const replay = await scheduler.processPost('job-1', {
+    force: true,
+    now: new Date('2026-06-20T12:01:00.000Z')
+  });
+  assert.equal(replay.mode, 'skipped');
+  assert.equal(publishCalls.length, 0);
 });
 
 test('failure classification separates transient from terminal errors', () => {

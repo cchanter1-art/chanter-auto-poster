@@ -82,6 +82,7 @@ function projectAutoPosterBatch(record = {}) {
   return {
     moduleId: 'autoposter',
     workId: batchId,
+    workKind: 'autoposter_batch',
     title: `Batch ${batchId.slice(0, 8) || '—'}`,
     state,
     stateReason: reason,

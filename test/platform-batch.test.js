@@ -921,7 +921,7 @@ test('authenticated Platform HTTP mission persists through review, acceptance, r
   assert.equal(activity.status, 200);
   const activityHtml = await activity.text();
   assert.match(activityHtml, new RegExp(batchId.slice(0, 8)));
-  assert.match(activityHtml, />Completed</);
+  assert.match(activityHtml, />Review completed</);
 
   const blockedResponse = await missionRequest('/api/platform/batches', {
     method: 'POST',
@@ -1299,7 +1299,7 @@ test('real Chrome customer mission persists, replays safely, and recovers from a
   await page.goto(`${baseUrl}/platform/autoposter/activity`, { waitUntil: 'networkidle' });
   const activityText = await page.locator('main').innerText();
   assert.match(activityText, new RegExp(`Batch ${batchId.slice(0, 8)}`));
-  assert.match(activityText, /Completed/);
+  assert.match(activityText, /Review completed/);
   await page.screenshot({
     path: path.join(evidenceDir, '06-activity.png'),
     fullPage: true

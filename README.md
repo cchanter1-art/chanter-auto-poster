@@ -250,7 +250,19 @@ If TikTok API credentials or a public image URL are not configured, the schedule
 
 ## Render Scheduling
 
-`render.yaml` defines a web service and a Render Cron Job that calls `/api/cron/tick` every minute. Set `APP_URL` on the cron service to the Render web-service URL. Both services must use the same `CRON_SECRET`; the Blueprint environment group handles this when deployed from `render.yaml`.
+`render.yaml` defines a web service and one Render Cron Job that calls
+`/api/cron/tick` every minute. The file alone does not create either service:
+the repository must be attached as a Render Blueprint instance, or the exact
+cron service must be created through the existing Render deployment process.
+After setup, verify that the Render workspace lists `chanter-scheduler-ping` as
+an active cron service; a committed but uninstantiated Blueprint is not a
+scheduler.
+
+Set `APP_URL` on the cron service to the Render web-service URL. Both services
+must use the same `CRON_SECRET`; the Blueprint environment group handles this
+when deployed from `render.yaml`. `SCHEDULER_BATCH_SIZE` bounds each tick and
+defaults to one so restoring a trigger cannot release an overdue backlog in one
+unreviewed wave.
 
 There is no in-process timer. Firestore is the source of truth, so a sleeping or restarted web service recovers overdue `scheduled` jobs on the next external tick. Each job is atomically changed to `processing` before TikTok submission, then to the existing compatibility state (`posted` for API acceptance or `failed` for terminal failure). The UI must still distinguish API acceptance from externally verified live publication.
 

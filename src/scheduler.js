@@ -1,6 +1,6 @@
 'use strict';
 
-const { randomUUID } = require('crypto');
+const { createHash, randomUUID } = require('crypto');
 const config = require('./config');
 const { postsCollection, getFirestore, Timestamp, FieldValue } = require('./firestore');
 const {
@@ -109,6 +109,62 @@ function retryBackoffMs(attempts) {
   return RETRY_BACKOFF_MINUTES[index] * 60 * 1000;
 }
 
+function timestampMillis(value) {
+  if (!value || typeof value.toMillis !== 'function') return 0;
+  try {
+    const millis = value.toMillis();
+    return Number.isFinite(millis) ? millis : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function createDispatchOperation(id, data, attemptNumber, now) {
+  const provider = String(data.provider || data.platform || providers.PROVIDER_TIKTOK)
+    .trim()
+    .toLowerCase();
+  const approvalMillis = timestampMillis(data.approvedAt);
+  const operationId = createHash('sha256')
+    .update(`scheduled-dispatch:v1:${id}:${approvalMillis}:${attemptNumber}`)
+    .digest('hex');
+  return {
+    version: 1,
+    operationId,
+    attemptNumber,
+    provider,
+    state: 'claimed',
+    claimedAt: Timestamp.fromDate(now),
+    startedAt: null,
+    completedAt: null,
+    providerMutationStarted: false
+  };
+}
+
+function dispatchOperationView(value) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    version: Number(value.version || 1),
+    operationId: String(value.operationId || ''),
+    attemptNumber: Number(value.attemptNumber || 0),
+    provider: String(value.provider || ''),
+    state: String(value.state || ''),
+    claimedAt: timestampToIso(value.claimedAt),
+    startedAt: timestampToIso(value.startedAt),
+    completedAt: timestampToIso(value.completedAt),
+    providerMutationStarted: Boolean(value.providerMutationStarted)
+  };
+}
+
+function completedDispatchOperation(data, state, completedAt, extra = {}) {
+  if (!data.dispatchOperation || typeof data.dispatchOperation !== 'object') return null;
+  return {
+    ...data.dispatchOperation,
+    state,
+    completedAt: Timestamp.fromDate(new Date(completedAt)),
+    ...extra
+  };
+}
+
 // Human-approval gate. A job may only be claimed for publishing when
 // approvedAt holds a real, finite Timestamp — set by an explicit human
 // action (the admin Approve button, or a client scheduling their own
@@ -124,6 +180,7 @@ const APPROVAL_BLOCKED_REASON =
 const PROVIDER_UNSUPPORTED = 'PROVIDER_UNSUPPORTED';
 const PUBLISH_ATTEMPT_BUDGET_EXHAUSTED = 'PUBLISH_ATTEMPT_BUDGET_EXHAUSTED';
 const PROVIDER_OPERATION_UNRESOLVED = 'PROVIDER_OPERATION_UNRESOLVED';
+const PROVIDER_DISPATCH_OUTCOME_UNKNOWN = 'PROVIDER_DISPATCH_OUTCOME_UNKNOWN';
 const ATTEMPT_BUDGET_BLOCKED_REASON =
   'The durable publish-attempt budget for this approval is exhausted; a new human approval is required.';
 
@@ -201,15 +258,20 @@ async function getSchedulerHealth() {
   };
 }
 
-async function runSchedulerTick({ now = new Date() } = {}) {
+async function runSchedulerTick({
+  now = new Date(),
+  batchSize = config.scheduler.batchSize
+} = {}) {
   const nowDate = now instanceof Date ? now : new Date(now);
   if (Number.isNaN(nowDate.getTime())) throw new Error('Scheduler tick received an invalid time');
+  const boundedBatchSize = Math.min(10, Math.max(1, Number(batchSize) || 1));
 
   const nowTimestamp = Timestamp.fromDate(nowDate);
   const workerId = `${process.env.RENDER_INSTANCE_ID || 'local'}-${randomUUID()}`;
   const summary = {
     ok: true,
     now: nowDate.toISOString(),
+    batchSize: boundedBatchSize,
     checked: 0,
     due: 0,
     posted: 0,
@@ -234,7 +296,7 @@ async function runSchedulerTick({ now = new Date() } = {}) {
 
   let dueJobs;
   try {
-    dueJobs = await findDueJobs(nowTimestamp);
+    dueJobs = await findDueJobs(nowTimestamp, boundedBatchSize);
     summary.checked = dueJobs.length;
     summary.due = dueJobs.length;
   } catch (error) {
@@ -282,13 +344,15 @@ async function publishNextPost() {
   return runSchedulerTick();
 }
 
-async function findDueJobs(nowTimestamp) {
+async function findDueJobs(nowTimestamp, batchSize = config.scheduler.batchSize) {
+  const boundedBatchSize = Math.min(10, Math.max(1, Number(batchSize) || 1));
   const jobs = new Map();
 
   const canonical = await postsCollection()
     .where('status', '==', 'scheduled')
     .where('scheduledAt', '<=', nowTimestamp)
     .orderBy('scheduledAt', 'asc')
+    .limit(boundedBatchSize)
     .get();
 
   for (const doc of canonical.docs) {
@@ -304,6 +368,7 @@ async function findDueJobs(nowTimestamp) {
     .where('status', '==', 'pending')
     .where('scheduledTimeUTC', '<=', nowTimestamp)
     .orderBy('scheduledTimeUTC', 'asc')
+    .limit(boundedBatchSize)
     .get();
 
   for (const doc of legacy.docs) {
@@ -313,7 +378,9 @@ async function findDueJobs(nowTimestamp) {
     });
   }
 
-  return [...jobs.values()].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+  return [...jobs.values()]
+    .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+    .slice(0, boundedBatchSize);
 }
 
 async function reclaimStaleLocks(nowDate) {
@@ -334,6 +401,44 @@ async function reclaimOne(ref) {
 
       const data = snap.data();
       if (data.status !== 'processing') return;
+
+      const dispatchOperation = data.dispatchOperation;
+      if (
+        dispatchOperation
+        && (
+          dispatchOperation.providerMutationStarted === true
+          || dispatchOperation.state === 'dispatching'
+        )
+      ) {
+        const reason =
+          'The worker lease expired after provider dispatch began; the provider outcome is unknown and automatic redispatch was blocked.';
+        tx.update(ref, {
+          status: 'outcome_unknown',
+          lockedAt: null,
+          lockedBy: null,
+          errorMessage: reason,
+          providerStatus: 'provider_reconciliation_required',
+          dispatchOperation: completedDispatchOperation(
+            data,
+            'outcome_unknown',
+            new Date().toISOString(),
+            { providerMutationStarted: true }
+          ),
+          lastResult: sanitizePostResult({
+            ok: false,
+            mode: 'api',
+            code: PROVIDER_DISPATCH_OUTCOME_UNKNOWN,
+            outcomeUnknown: true,
+            providerMutationStarted: true,
+            failureBoundary: 'expired_dispatch_lease',
+            reason,
+            completedAt: new Date().toISOString()
+          }),
+          history: appendHistoryEntry(data.history, 'outcome_unknown', reason),
+          updatedAt: FieldValue.serverTimestamp()
+        });
+        return;
+      }
 
       const attempts = Number(data.claimAttempts || 0);
       const attemptBudget = resolvePublishAttemptBudget(data);
@@ -366,6 +471,16 @@ async function reclaimOne(ref) {
         scheduledAt,
         lockedAt: null,
         lockedBy: null,
+        ...(dispatchOperation
+          ? {
+              dispatchOperation: completedDispatchOperation(
+                data,
+                'abandoned_pre_provider',
+                new Date().toISOString(),
+                { providerMutationStarted: false }
+              )
+            }
+          : {}),
         history: appendHistoryEntry(data.history, 'lock_reclaimed', 'Worker lock expired; job returned to the schedule for retry.'),
         updatedAt: FieldValue.serverTimestamp()
       });
@@ -475,23 +590,64 @@ async function claimPost(id, { force, workerId, now = new Date() }) {
           attemptNumber: attempts + 1
         })
       : null;
+    const dispatchOperation = createDispatchOperation(id, data, attempts + 1, now);
 
     tx.update(ref, {
       status: 'processing',
       lockedAt: FieldValue.serverTimestamp(),
       lockedBy: workerId,
       claimAttempts: FieldValue.increment(1),
+      dispatchOperation,
       ...(providerOperation ? { providerOperation } : {}),
-      history: appendHistoryEntry(data.history, 'publish_attempt', `Claimed by worker for publishing (attempt ${attempts + 1} of ${attemptBudget} authorized claims).`),
+      history: appendHistoryEntry(
+        data.history,
+        'publish_attempt',
+        `Dispatch ${dispatchOperation.operationId.slice(0, 12)} claimed (attempt ${attempts + 1} of ${attemptBudget} authorized claims).`
+      ),
       updatedAt: FieldValue.serverTimestamp()
     });
 
     const claimed = postFromDoc(snap);
     claimed.status = 'processing';
     claimed.claimAttempts = attempts + 1;
+    claimed.dispatchOperation = dispatchOperationView(dispatchOperation);
     if (providerOperation) claimed.providerOperation = sanitizeProviderOperation(providerOperation);
     return claimed;
   });
+}
+
+async function markDispatchStarted(id, workerId, operationId, now = new Date()) {
+  const ref = postsCollection().doc(id);
+  let applied = false;
+  await getFirestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const data = snap.data();
+    const operation = data.dispatchOperation;
+    if (
+      data.status !== 'processing'
+      || data.lockedBy !== workerId
+      || !operation
+      || operation.operationId !== operationId
+      || operation.state !== 'claimed'
+    ) return;
+    tx.update(ref, {
+      dispatchOperation: {
+        ...operation,
+        state: 'dispatching',
+        startedAt: Timestamp.fromDate(now),
+        providerMutationStarted: true
+      },
+      history: appendHistoryEntry(
+        data.history,
+        'provider_dispatch_started',
+        `Dispatch ${operationId.slice(0, 12)} entered the provider adapter.`
+      ),
+      updatedAt: FieldValue.serverTimestamp()
+    });
+    applied = true;
+  });
+  return applied;
 }
 
 async function processPost(id, {
@@ -539,7 +695,8 @@ async function processPost(id, {
     };
   }
 
-  console.log(`[POST_START] id=${id}`);
+  const dispatchOperationId = claimed.dispatchOperation && claimed.dispatchOperation.operationId;
+  console.log(`[DISPATCH_CLAIMED] id=${id} operationId=${dispatchOperationId}`);
   // Provider dispatch. postsMapper already normalizes a MISSING legacy
   // provider to TikTok; an EXPLICIT provider value is honored as stored.
   // Only providers with a real publish handler below may execute — an
@@ -548,6 +705,29 @@ async function processPost(id, {
   const providerId = String(claimed.provider || claimed.platform || providers.PROVIDER_TIKTOK)
     .trim()
     .toLowerCase();
+  const invokesProviderAdapter = (
+    providerId === providers.PROVIDER_INSTAGRAM
+    || providerId === providers.PROVIDER_YOUTUBE
+    || (
+      providerId === providers.PROVIDER_TIKTOK
+      && claimed.accountId
+      && claimed.accountId !== 'legacy'
+      && claimed.accountAssignment !== 'legacy'
+    )
+  );
+  if (invokesProviderAdapter) {
+    const marked = await markDispatchStarted(id, workerId, dispatchOperationId, now);
+    if (!marked) {
+      return {
+        ok: false,
+        mode: 'skipped',
+        postId: id,
+        operationId: dispatchOperationId,
+        reason: 'Dispatch operation changed before provider invocation.'
+      };
+    }
+    console.log(`[POST_START] id=${id} operationId=${dispatchOperationId}`);
+  }
   let result;
   try {
     if (providerId === providers.PROVIDER_INSTAGRAM) {
@@ -582,12 +762,16 @@ async function processPost(id, {
     result = {
       ok: false,
       mode: 'api',
+      code: PROVIDER_DISPATCH_OUTCOME_UNKNOWN,
+      outcomeUnknown: invokesProviderAdapter,
+      providerMutationStarted: invokesProviderAdapter,
+      failureBoundary: invokesProviderAdapter ? 'provider_adapter_exception' : 'before_provider_adapter',
       reason: error.message || 'Unexpected TikTok publish error',
       response: error.response || null
     };
   }
 
-  const finalized = await finalize(id, workerId, result);
+  const finalized = await finalize(id, workerId, result, dispatchOperationId);
   if (finalized.ok) {
     console.log(`[POST_SUCCESS] id=${id} providerResponse=${JSON.stringify(safeTikTokSummary(result))}`);
   } else {
@@ -622,7 +806,7 @@ async function publishScheduledInstagramPost(post) {
   });
 }
 
-async function finalize(id, workerId, result) {
+async function finalize(id, workerId, result, dispatchOperationId = '') {
   const ref = postsCollection().doc(id);
   const completedAt = new Date().toISOString();
   let publishId = extractPublishId(result && result.response);
@@ -657,6 +841,13 @@ async function finalize(id, workerId, result) {
     if (!snap.exists) return;
     const data = snap.data();
     if (data.status !== 'processing' || data.lockedBy !== workerId) return;
+    if (
+      dispatchOperationId
+      && (
+        !data.dispatchOperation
+        || data.dispatchOperation.operationId !== dispatchOperationId
+      )
+    ) return;
     const providerId = String(data.provider || data.platform || providers.PROVIDER_TIKTOK)
       .trim()
       .toLowerCase();
@@ -705,6 +896,16 @@ async function finalize(id, workerId, result) {
         lastResult: sanitizePostResult({ ...result, completedAt }),
         usageState: usageTransition ? usageTransition.state : (data.usageState || ''),
         usageReconciliationRequired,
+        ...(data.dispatchOperation
+          ? {
+              dispatchOperation: completedDispatchOperation(
+                data,
+                'succeeded',
+                completedAt,
+                { providerMutationStarted: Boolean(data.dispatchOperation.providerMutationStarted) }
+              )
+            }
+          : {}),
         history: appendHistoryEntry(data.history, 'posted', successDetail),
         updatedAt: FieldValue.serverTimestamp()
       };
@@ -745,6 +946,20 @@ async function finalize(id, workerId, result) {
         }),
         usageState: usageTransition ? usageTransition.state : (data.usageState || 'reserved'),
         usageReconciliationRequired,
+        ...(data.dispatchOperation
+          ? {
+              dispatchOperation: completedDispatchOperation(
+                data,
+                'outcome_unknown',
+                completedAt,
+                {
+                  providerMutationStarted:
+                    result.providerMutationStarted === true
+                    || data.dispatchOperation.providerMutationStarted === true
+                }
+              )
+            }
+          : {}),
         history: appendHistoryEntry(data.history, 'outcome_unknown', reason),
         updatedAt: FieldValue.serverTimestamp()
       };
@@ -781,6 +996,20 @@ async function finalize(id, workerId, result) {
           errorMessage: reason,
           lockedAt: null,
           lockedBy: null,
+          ...(data.dispatchOperation
+            ? {
+                dispatchOperation: completedDispatchOperation(
+                  data,
+                  'failed_retryable',
+                  completedAt,
+                  {
+                    providerMutationStarted:
+                      result.providerMutationStarted === true
+                      || data.dispatchOperation.providerMutationStarted === true
+                  }
+                )
+              }
+            : {}),
           lastResult: sanitizePostResult({ ...safeResult, willRetry: true, attempts }),
           history: appendHistoryEntry(data.history, 'retry_scheduled', reason),
           updatedAt: FieldValue.serverTimestamp()
@@ -800,6 +1029,20 @@ async function finalize(id, workerId, result) {
           errorMessage: reason,
           lockedAt: null,
           lockedBy: null,
+          ...(data.dispatchOperation
+            ? {
+                dispatchOperation: completedDispatchOperation(
+                  data,
+                  'failed_terminal',
+                  completedAt,
+                  {
+                    providerMutationStarted:
+                      result.providerMutationStarted === true
+                      || data.dispatchOperation.providerMutationStarted === true
+                  }
+                )
+              }
+            : {}),
           ...(attemptBudgetExhausted ? { providerStatus: 'attempt_budget_exhausted' } : {}),
           lastResult: sanitizePostResult(terminalResult),
           history: appendHistoryEntry(
@@ -846,6 +1089,7 @@ function normalizeTimestamp(value) {
 }
 
 function timestampToIso(value) {
+  if (!value) return '';
   if (value && typeof value.toDate === 'function') return value.toDate().toISOString();
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
@@ -903,9 +1147,14 @@ module.exports = {
   APPROVAL_REQUIRED,
   PROVIDER_UNSUPPORTED,
   PUBLISH_ATTEMPT_BUDGET_EXHAUSTED,
+  PROVIDER_DISPATCH_OUTCOME_UNKNOWN,
   _private: {
     claimPost,
     findDueJobs,
+    reclaimStaleLocks,
+    markDispatchStarted,
+    createDispatchOperation,
+    dispatchOperationView,
     isExplicitlyApproved,
     isTransientPublishFailure,
     retryBackoffMs,

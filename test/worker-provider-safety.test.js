@@ -164,7 +164,7 @@ test('worker publishes TikTok jobs, refuses unsupported explicit providers, and 
   });
 
   const scheduler = require('../src/scheduler');
-  const summary = await scheduler.runSchedulerTick({ now: fixedNow });
+  const summary = await scheduler.runSchedulerTick({ now: fixedNow, batchSize: 10 });
 
   // Both TikTok-bound jobs (explicit + legacy) published through the one
   // existing TikTok boundary; nothing else reached it.

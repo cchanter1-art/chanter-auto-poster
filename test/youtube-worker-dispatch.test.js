@@ -174,7 +174,7 @@ test('worker routes YouTube jobs to the adapter and persists truthful outcomes',
   });
 
   const scheduler = require('../src/scheduler');
-  const summary = await scheduler.runSchedulerTick({ now: fixedNow });
+  const summary = await scheduler.runSchedulerTick({ now: fixedNow, batchSize: 10 });
 
   // Routing: exactly the three runnable YouTube jobs reached the adapter;
   // the TikTok job stayed on the TikTok path; the job that already has a
@@ -216,7 +216,7 @@ test('worker routes YouTube jobs to the adapter and persists truthful outcomes',
 
   // A second tick cannot double-publish anything: posted jobs are not due,
   // outcome_unknown jobs are not claimable, publishId jobs are refused.
-  const secondSummary = await scheduler.runSchedulerTick({ now: fixedNow });
+  const secondSummary = await scheduler.runSchedulerTick({ now: fixedNow, batchSize: 10 });
   assert.deepEqual(youtubeCalls.sort(), ['youtube-ambiguous-job', 'youtube-ok-job', 'youtube-unverified-job'], 'no second adapter call for any job');
   assert.equal(tiktokCalls.length, 1);
   assert.equal(secondSummary.posted, 0);

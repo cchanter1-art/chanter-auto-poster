@@ -30,12 +30,20 @@
             <% if (item.href) { %>
               <a class="module-list-item" href="<%= item.href %>">
                 <strong><%= item.title %></strong>
-                <span><%= item.queueLabel || state.label %></span>
+                <span><%= item.queueLabel || (
+                  mode === 'activity' && item.workKind === 'autoposter_batch'
+                    ? 'Review completed'
+                    : state.label
+                ) %></span>
               </a>
             <% } else { %>
               <div class="module-list-item">
                 <strong><%= item.title %></strong>
-                <span><%= item.queueLabel || state.label %></span>
+                <span><%= item.queueLabel || (
+                  mode === 'activity' && item.workKind === 'autoposter_batch'
+                    ? 'Review completed'
+                    : state.label
+                ) %></span>
               </div>
             <% } %>
           <% }); %>

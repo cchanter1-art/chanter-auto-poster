@@ -344,7 +344,7 @@ test('Queue keeps completed-review batches only while approved items remain acti
   assert.equal(activity.status, 200);
   const activityHtml = await activity.text();
   assert.match(activityHtml, /Batch batch-do/);
-  assert.match(activityHtml, />Completed</);
+  assert.match(activityHtml, />Review completed</);
 
   itemStatus = 'posted';
   const terminalQueue = await fetch(`${baseUrl}/platform/autoposter/queue`);

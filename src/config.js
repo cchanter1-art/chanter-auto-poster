@@ -88,6 +88,10 @@ module.exports = {
   },
 
   scheduler: {
+    // One tick claims only a bounded number of due rows. Default to one so
+    // restoring a missing external trigger cannot release an old backlog as
+    // an unreviewed publish wave.
+    batchSize: Math.min(10, Math.max(1, Number(process.env.SCHEDULER_BATCH_SIZE || 1))),
     // How long a post is allowed to sit in "processing" before the
     // watchdog assumes the worker crashed and reclaims it.
     staleLockMinutes: Number(process.env.SCHEDULER_STALE_LOCK_MINUTES || 20),

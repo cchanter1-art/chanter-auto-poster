@@ -7,6 +7,8 @@ envVarGroups:
         value: Asia/Nicosia
       - key: TZ
         value: Asia/Nicosia
+      - key: SCHEDULER_BATCH_SIZE
+        value: 1
 
 services:
   - type: web

@@ -20,7 +20,7 @@ ephemeral filesystem:
    request that wakes the dyno back up.
 
 Moving the data to Firestore fixes (1). It does not, by itself, fix (2) —
-you still need something external hitting `/run-scheduler` on a schedule
+you still need something external hitting `/api/cron/tick` on a schedule
 (see "Wake-up trigger" below) so a sleeping dyno actually gets woken up in
 time. The reason this combination is safe is idempotency: no matter how
 many things call the scheduler, or how overlapping or delayed those calls
@@ -119,29 +119,24 @@ network call, since the SDK can retry a transaction body on contention.
 1. **Render restarts or redeploys.** Pending posts are untouched —
    they're rows in Firestore, not files on the dyno's disk or timers in
    its memory.
-2. **The dyno was asleep when a post became due.** `node-cron` can't fire
-   if the process isn't running. Configure something external — a Render
-   **Cron Job** (a separate, always-scheduled Render service type) or a
-   free uptime pinger — to hit `GET /run-scheduler?secret=...` every
-   minute. That request both wakes the dyno and triggers a tick. Keep the
-   in-process `node-cron` too: it's free coverage for whenever the dyno
-   happens to already be awake, and costs nothing since both paths are
-   idempotent.
-3. **The scheduler crashes mid-publish.** The post is left in
-   `processing`. Every tick first runs `reclaimStaleLocks()`, which finds
-   posts stuck in `processing` for longer than
-   `SCHEDULER_STALE_LOCK_MINUTES` (default 10) and flips them back to
-   `pending` so the next tick retries them — or, after
-   `SCHEDULER_MAX_ATTEMPTS` (default 5) retries, marks them `failed`
-   instead of looping forever on a broken post.
-4. **A known limitation, stated plainly:** if TikTok actually received
-   and processed the post right before the crash, but the app crashed
-   before recording that success, a retry will publish it again — a real
-   duplicate on TikTok's side, not a Firestore-level one. Avoiding this
-   completely would need an idempotency key on TikTok's API or storing
-   the `publish_id` immediately on submit and checking its status on
-   retry before resubmitting. Worth doing if duplicate posts become a
-   real problem; out of scope for "fix the scheduler's durability."
+2. **The web service was asleep when a post became due.** The canonical
+   Render Cron Job invokes `npm run scheduler:ping` every minute. That
+   command calls `GET /api/cron/tick` with `CRON_SECRET` in the
+   `x-cron-secret` header. There is no in-process scheduler timer.
+   `render.yaml` declares the cron, but the file is only deployment intent:
+   the Blueprint must be instantiated (or the exact cron service must be
+   created) and the active `chanter-scheduler-ping` service must be verified
+   in Render before scheduled dispatch is operational.
+3. **The scheduler crashes before provider dispatch.** The post remains
+   `processing` with a stable dispatch operation. After
+   `SCHEDULER_STALE_LOCK_MINUTES` (default 10), a tick can return a claim
+   that never entered the provider adapter to `pending`, subject to
+   `SCHEDULER_MAX_ATTEMPTS` (default 5).
+4. **The scheduler crashes after provider dispatch begins.** The stale
+   claim is marked `outcome_unknown` and automatic redispatch is blocked.
+   The durable dispatch operation ID and provider evidence must be
+   reconciled before any founder-authorized retry. This fails closed
+   instead of risking a duplicate provider publication.
 
 ## Multi-user
 
@@ -181,7 +176,7 @@ Optional tuning (all have sane defaults):
 - `APP_DEFAULT_USER_ID` (default `owner`)
 - `SCHEDULER_STALE_LOCK_MINUTES` (default `10`)
 - `SCHEDULER_MAX_ATTEMPTS` (default `5`)
-- `SCHEDULER_BATCH_SIZE` (default `10`)
+- `SCHEDULER_BATCH_SIZE` (default `1`, maximum `10`)
 
 ## Migration
 
