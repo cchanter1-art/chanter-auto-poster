@@ -67,16 +67,16 @@ function stripMarkup(markup) {
     .trim();
 }
 
-test('the initial customer screen has one dominant action and three compact destinations', () => {
+test('the initial customer screen has one dominant action and four module destinations', () => {
   const html = renderComposer();
   const navStart = html.indexOf('<nav class="platform-nav customer-nav"');
   const nav = html.slice(navStart, html.indexOf('</nav>', navStart));
 
-  assert.equal((nav.match(/class="platform-nav-link/g) || []).length, 3);
-  for (const destination of ['Queue', 'Accounts', 'Activity']) {
+  assert.equal((nav.match(/class="platform-nav-link/g) || []).length, 4);
+  for (const destination of ['Compose', 'Queue', 'Accounts', 'Activity']) {
     assert.ok(nav.includes(`>${destination}</a>`), `${destination} stays reachable`);
   }
-  for (const forbidden of ['Overview', 'Compose', 'Modules', 'Approvals', 'Evidence', 'System health', 'Classic console']) {
+  for (const forbidden of ['Overview', 'Modules', 'Approvals', 'Evidence', 'System health', 'Classic console']) {
     assert.doesNotMatch(nav, new RegExp(forbidden, 'i'));
   }
 

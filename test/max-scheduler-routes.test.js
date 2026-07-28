@@ -203,14 +203,14 @@ test('Max Scheduler campaign creation and Release Queue visibility', async (t) =
     method: 'POST',
     redirect: 'manual',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter' })
+    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter/legacy' })
   });
   const adminCookie = String(loginResponse.headers.get('set-cookie') || '').split(';')[0];
   assert.match(adminCookie, /^chanter_admin_session=/);
 
   // ── Default view: the seeded campaign spans 2 channels, so the queue
   // defaults to All Channels and shows a parent campaign summary ─────────
-  const defaultResponse = await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } });
+  const defaultResponse = await fetch(`${baseUrl}/private/autoposter/legacy`, { headers: { Cookie: adminCookie } });
   const defaultHtml = await defaultResponse.text();
   assert.equal(defaultResponse.status, 200);
   assert.match(defaultHtml, /@__chanter/);
@@ -235,7 +235,7 @@ test('Max Scheduler campaign creation and Release Queue visibility', async (t) =
 
   // ── Active Channel mode: only the active channel's job, plus the
   // required explanatory copy ─────────────────────────────────────────────
-  const activeResponse = await fetch(`${baseUrl}/private/autoposter?queueView=active`, { headers: { Cookie: adminCookie } });
+  const activeResponse = await fetch(`${baseUrl}/private/autoposter/legacy?queueView=active`, { headers: { Cookie: adminCookie } });
   const activeHtml = await activeResponse.text();
   assert.equal(activeResponse.status, 200);
   // The channel picker always lists every account regardless of queue
@@ -247,7 +247,7 @@ test('Max Scheduler campaign creation and Release Queue visibility', async (t) =
   assert.match(activeHtml, /class="btn btn-primary" href="\?queueView=active"/);
 
   // ── All Channels mode explicitly requested ──────────────────────────────
-  const allResponse = await fetch(`${baseUrl}/private/autoposter?queueView=all`, { headers: { Cookie: adminCookie } });
+  const allResponse = await fetch(`${baseUrl}/private/autoposter/legacy?queueView=all`, { headers: { Cookie: adminCookie } });
   const allHtml = await allResponse.text();
   assert.equal(allResponse.status, 200);
   assert.match(allHtml, /chanter-queued\.jpg/);
@@ -280,8 +280,8 @@ test('Max Scheduler campaign creation and Release Queue visibility', async (t) =
   // it says so to machine callers, naming the surface that replaced it. It is
   // never a redirect: a redirected POST would silently discard the body.
   assert.equal(dualResponse.headers.get('deprecation'), 'true', 'the adapter announces its deprecation');
-  assert.match(dualResponse.headers.get('link') || '', /<\/platform\/compose>;\s*rel="successor-version"/);
-  assert.notEqual(dualResponse.headers.get('location'), '/platform/compose', 'a POST is adapted, never redirected');
+  assert.match(dualResponse.headers.get('link') || '', /<\/platform\/autoposter\/compose>;\s*rel="successor-version"/);
+  assert.notEqual(dualResponse.headers.get('location'), '/platform/autoposter/compose', 'a POST is adapted, never redirected');
   assert.equal(applyExplicitScheduleCalls.length, 1, 'Max Scheduler path was used instead of autoSchedulePosts');
   assert.equal(autoScheduleCalls.length, 0);
   const firstPlan = applyExplicitScheduleCalls[0].plan;
@@ -509,7 +509,7 @@ test('Max Scheduler campaign creation and Release Queue visibility', async (t) =
   // correctly, so the queue-refresh guarantees the removed intake form used to
   // trigger are asserted here in their own right — they are queue behaviour,
   // not intake behaviour, and they outlived the form.
-  const intakeHtml = await (await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } })).text();
+  const intakeHtml = await (await fetch(`${baseUrl}/private/autoposter/legacy`, { headers: { Cookie: adminCookie } })).text();
   for (const [, inlineScript] of intakeHtml.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) {
     if (inlineScript.trim()) new vm.Script(inlineScript, { filename: 'rendered-index-inline.js' });
   }

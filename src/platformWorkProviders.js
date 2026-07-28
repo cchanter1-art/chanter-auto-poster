@@ -181,7 +181,7 @@ function createWorkRegistry() {
             ...item,
             workId: commandId,
             href: commandId
-              ? `/platform/compose/commands/${encodeURIComponent(commandId)}`
+              ? `/platform/autoposter/compose/commands/${encodeURIComponent(commandId)}`
               : ''
           }, 'autoposter', ownershipOf('autoposter')));
         } else {
@@ -286,7 +286,7 @@ function createWorkRegistry() {
         stateReason,
         needsApproval: group.some((item) => item.needsApproval),
         href: command && canonicalWorkId
-          ? `/platform/compose/commands/${encodeURIComponent(canonicalWorkId)}`
+          ? `/platform/autoposter/compose/commands/${encodeURIComponent(canonicalWorkId)}`
           : '',
         createdAt,
         updatedAt,

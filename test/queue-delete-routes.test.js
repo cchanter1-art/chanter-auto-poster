@@ -101,7 +101,7 @@ test('queue delete is truthful and works across channels; bulk delete reports pe
       res.status(error.status || 500).json({ ok: false, reason: error.message || 'Unexpected server error' });
       return;
     }
-    res.redirect(`/private/autoposter?notice=${encodeURIComponent(error.message || 'Unexpected server error')}`);
+    res.redirect(`/private/autoposter/legacy?notice=${encodeURIComponent(error.message || 'Unexpected server error')}`);
   });
 
   const server = await new Promise((resolve) => {
@@ -127,13 +127,13 @@ test('queue delete is truthful and works across channels; bulk delete reports pe
     method: 'POST',
     redirect: 'manual',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter' })
+    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter/legacy' })
   });
   const adminCookie = String(loginResponse.headers.get('set-cookie') || '').split(';')[0];
   assert.match(adminCookie, /^chanter_admin_session=/);
 
   // ── All Channels view renders both channels' cards with delete + mark UI ──
-  const pageResponse = await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } });
+  const pageResponse = await fetch(`${baseUrl}/private/autoposter/legacy`, { headers: { Cookie: adminCookie } });
   const pageHtml = await pageResponse.text();
   assert.equal(pageResponse.status, 200);
   assert.match(pageHtml, /job-a-video\.mp4/);
@@ -179,7 +179,7 @@ test('queue delete is truthful and works across channels; bulk delete reports pe
   deleteBehavior.set('job-a-1', true);
 
   // The card is still visible after a failed delete (storage unchanged).
-  const afterFailureHtml = await (await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } })).text();
+  const afterFailureHtml = await (await fetch(`${baseUrl}/private/autoposter/legacy`, { headers: { Cookie: adminCookie } })).text();
   assert.match(afterFailureHtml, /job-a-video\.mp4/);
 
   // ── Bulk delete: empty selection is rejected ─────────────────────────────

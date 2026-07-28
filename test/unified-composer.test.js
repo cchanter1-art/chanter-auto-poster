@@ -1083,7 +1083,7 @@ test('a series is observable as work with honest counts and its recurrence param
   assert.equal(item.state, platformStatus.WORK_STATE.WAITING_APPROVAL);
   assert.equal(item.needsApproval, true);
   assert.equal(item.counts.awaiting, 5);
-  assert.equal(item.href, '/private/autoposter', 'occurrences are reviewed in the Release Queue');
+  assert.equal(item.href, '/platform/autoposter/queue', 'occurrences are reviewed inside the AutoPoster Queue');
   // Evidence retains what the series was asked to do.
   assert.equal(item.recurrence.frequency, 'daily');
   assert.equal(item.recurrence.occurrenceCount, 5);
@@ -1254,7 +1254,7 @@ async function withServer(t, run) {
 
 test('the canonical composer route serves the one composer', async (t) => {
   await withServer(t, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/platform/compose`);
+    const response = await fetch(`${baseUrl}/platform/autoposter/compose`);
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.ok(html.includes('id="compose-form"'), 'the canonical composer renders');
@@ -1263,15 +1263,19 @@ test('the canonical composer route serves the one composer', async (t) => {
   });
 });
 
-test('legacy posting routes redirect to the canonical composer and hold no implementation', async (t) => {
+test('module root and saved composer routes converge on the canonical module composer', async (t) => {
   await withServer(t, async (baseUrl) => {
-    const legacyModule = await fetch(`${baseUrl}/platform/autoposter`, { redirect: 'manual' });
-    assert.equal(legacyModule.status, 302);
-    assert.equal(legacyModule.headers.get('location'), '/platform/compose');
+    const moduleRoot = await fetch(`${baseUrl}/platform/autoposter`, { redirect: 'manual' });
+    assert.equal(moduleRoot.status, 302);
+    assert.equal(moduleRoot.headers.get('location'), '/platform/autoposter/compose');
+
+    const legacyComposer = await fetch(`${baseUrl}/platform/compose`, { redirect: 'manual' });
+    assert.equal(legacyComposer.status, 302);
+    assert.equal(legacyComposer.headers.get('location'), '/platform/autoposter/compose');
 
     const legacyReview = await fetch(`${baseUrl}/platform/autoposter/batches/batch-abc-123`, { redirect: 'manual' });
     assert.equal(legacyReview.status, 302);
-    assert.equal(legacyReview.headers.get('location'), '/platform/compose/batch-abc-123');
+    assert.equal(legacyReview.headers.get('location'), '/platform/autoposter/compose/batch-abc-123');
 
     // A saved link is not a dead end: following it lands on the canonical page.
     const followed = await fetch(`${baseUrl}/platform/autoposter`);
@@ -1290,17 +1294,15 @@ test('legacy posting routes redirect to the canonical composer and hold no imple
 test('primary navigation offers exactly one way to create content', async (t) => {
   await withServer(t, async (baseUrl) => {
     const html = await (await fetch(`${baseUrl}/platform`)).text();
-    const nav = html.slice(html.indexOf('<nav class="platform-nav"'), html.indexOf('</nav>', html.indexOf('<nav class="platform-nav"')));
-
-    assert.equal((nav.match(/href="\/platform\/compose"/g) || []).length, 1, 'one composer entry');
-    assert.doesNotMatch(nav, /\/platform\/autoposter/, 'the legacy posting entry is gone from the nav');
-    assert.match(nav, /data-nav="compose"/);
+    assert.equal((html.match(/href="\/platform\/autoposter\/compose"/g) || []).length, 1, 'one AutoPoster entry');
+    assert.match(html, /data-module="autoposter"/);
+    assert.doesNotMatch(html, /href="\/private\/autoposter/);
   });
 });
 
 test('history stays on the dashboard surfaces and out of the composer', async (t) => {
   await withServer(t, async (baseUrl) => {
-    const composer = await (await fetch(`${baseUrl}/platform/compose`)).text();
+    const composer = await (await fetch(`${baseUrl}/platform/autoposter/compose`)).text();
     assert.ok(!composer.includes('id="batch-list"'), 'no history list inside the composer');
     assert.doesNotMatch(composer, /Recent batches/i);
 
@@ -1309,11 +1311,16 @@ test('history stays on the dashboard surfaces and out of the composer', async (t
     assert.equal(work.status, 200);
     const evidence = await fetch(`${baseUrl}/platform/evidence`);
     assert.equal(evidence.status, 200);
-    // The console that owns connected channels, the release queue and publish
-    // history is still declared as a customer surface.
+    const queuePage = await fetch(`${baseUrl}/platform/autoposter/queue`);
+    assert.equal(queuePage.status, 200);
+    const activityPage = await fetch(`${baseUrl}/platform/autoposter/activity`);
+    assert.equal(activityPage.status, 200);
+
+    // Queue and Activity are surfaces inside the one AutoPoster module, not a
+    // second customer module.
     const modules = await (await fetch(`${baseUrl}/api/platform/modules`)).json();
-    const queue = modules.modules.find((module) => module.id === 'publishing-queue');
-    assert.equal(queue.href, '/private/autoposter');
-    assert.match(queue.summary, /release queue, publish history/);
+    const customer = modules.modules.filter((module) => module.surface === 'customer');
+    assert.deepEqual(customer.map((module) => module.id), ['autoposter']);
+    assert.equal(customer[0].href, '/platform/autoposter');
   });
 });

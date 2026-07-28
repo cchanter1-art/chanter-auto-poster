@@ -30,11 +30,13 @@ test('creates signed expiring admin sessions and rejects tampering', () => {
   assert.equal(verifyAdminSessionToken(token, session.exp + 1), null);
 });
 
-test('only permits local AutoPoster return paths', () => {
+test('only permits local Platform and explicitly internal return paths', () => {
   assert.equal(safeReturnTo('/private/autoposter/dashboard'), '/private/autoposter/dashboard');
-  assert.equal(safeReturnTo('/private/autoposter/accounts'), '/private/autoposter/accounts');
-  assert.equal(safeReturnTo('https://attacker.example'), '/private/autoposter');
-  assert.equal(safeReturnTo('//attacker.example'), '/private/autoposter');
+  assert.equal(safeReturnTo('/private/autoposter/legacy'), '/private/autoposter/legacy');
+  assert.equal(safeReturnTo('/platform/autoposter/accounts'), '/platform/autoposter/accounts');
+  assert.equal(safeReturnTo('/private/autoposter/accounts'), '/platform');
+  assert.equal(safeReturnTo('https://attacker.example'), '/platform');
+  assert.equal(safeReturnTo('//attacker.example'), '/platform');
 });
 
 test('refuses to validate an unset or weak admin password', () => {

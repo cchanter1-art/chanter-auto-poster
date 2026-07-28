@@ -81,10 +81,11 @@ const BATCH_RECORDS = [
 
 test('module registry declares AutoPoster as the first customer module', () => {
   const customer = platformModules.listCustomerModules();
-  assert.ok(customer.length >= 1);
+  assert.equal(customer.length, 1);
   assert.equal(customer[0].id, 'autoposter');
-  assert.equal(customer[0].href, '/platform/compose');
+  assert.equal(customer[0].href, '/platform/autoposter');
   assert.equal(customer[0].state, platformModules.STATE_ACTIVE);
+  assert.equal(platformModules.getModule('publishing-queue').id, 'autoposter');
 });
 
 test('module registry is broader than AutoPoster and has unique ids', () => {
@@ -177,7 +178,7 @@ function startServer() {
 
 // Anything a shell page links to must be a customer-owned platform path. This
 // is the machine-checked half of the customer/internal separation.
-const ALLOWED_HREF_PREFIXES = ['/platform', '/private/autoposter'];
+const ALLOWED_HREF_PREFIXES = ['/platform'];
 
 function hrefsIn(html) {
   return Array.from(html.matchAll(/href="([^"]+)"/g))
@@ -225,16 +226,17 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
     pages[path] = await response.text();
   }
 
-  // 1. Canonical navigation is present and identical on every surface.
-  for (const [path, html] of Object.entries(pages)) {
+  // 1. Operational shell navigation remains consistent off the minimal home.
+  for (const [path, html] of Object.entries(pages).filter(([path]) => path !== '/platform')) {
     for (const navId of ['overview', 'modules', 'work', 'approvals', 'evidence', 'health']) {
       assert.ok(html.includes(`data-nav="${navId}"`), `${path} is missing nav item ${navId}`);
     }
   }
 
-  // 2. Each surface marks itself active exactly once.
+  // 2. The minimal home has no operational nav; every other surface marks
+  //    itself active exactly once.
+  assert.doesNotMatch(pages['/platform'], /<nav class="platform-nav/);
   const activeById = {
-    '/platform': 'overview',
     '/platform/modules': 'modules',
     '/platform/work': 'work',
     '/platform/approvals': 'approvals',
@@ -250,6 +252,10 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   // 3. The platform is visibly broader than AutoPoster, and AutoPoster is a
   //    module inside it rather than the shell itself.
   assert.ok(pages['/platform'].includes('data-module="autoposter"'));
+  assert.ok(pages['/platform'].includes('href="/platform/autoposter/compose"'));
+  assert.ok(pages['/platform'].includes('href="/platform/autoposter/activity"'));
+  assert.ok(pages['/platform'].includes('href="/platform/autoposter/accounts"'));
+  assert.ok(!pages['/platform'].includes('data-testid="overview-summary"'));
   assert.ok(pages['/platform/modules'].includes('data-module="operator"'));
   assert.ok(pages['/platform/modules'].includes('data-module="agent-runtime"'));
   assert.ok(pages['/platform'].includes('CHANTER Platform'));
@@ -279,7 +285,7 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   //    owning module's review page rather than approving anything itself.
   assert.ok(pages['/platform/approvals'].includes('data-work="batch-waiting-0002"'));
   assert.ok(!pages['/platform/approvals'].includes('data-work="batch-donee-0004"'));
-  assert.ok(pages['/platform/approvals'].includes('/platform/compose/batch-waiting-0002'));
+  assert.ok(pages['/platform/approvals'].includes('/platform/autoposter/compose/batch-waiting-0002'));
 
   // 8. Evidence indexes every work record with its prepared/failed/accepted tally.
   for (const record of BATCH_RECORDS) {
@@ -332,7 +338,7 @@ test('the platform shell and customer composer are English-only', async (t) => {
   // 3. The canonical customer composer follows the same worldwide-first
   //    language contract and replaces the shell's operational navigation with
   //    exactly three compact customer destinations.
-  const modulePage = await (await fetch(`${baseUrl}/platform/compose`)).text();
+  const modulePage = await (await fetch(`${baseUrl}/platform/autoposter/compose`)).text();
   assert.equal(GREEK_CHARACTERS.test(shellChrome(modulePage)), false, 'shell chrome must be English on module pages too');
   assert.equal(GREEK_CHARACTERS.test(modulePage), false, 'customer composer must be English-only');
   assert.match(modulePage, /<html lang="en">/);
@@ -340,8 +346,8 @@ test('the platform shell and customer composer are English-only', async (t) => {
     modulePage.indexOf('<nav class="platform-nav customer-nav"'),
     modulePage.indexOf('</nav>', modulePage.indexOf('<nav class="platform-nav customer-nav"'))
   );
-  assert.equal((customerNav.match(/class="platform-nav-link/g) || []).length, 3);
-  for (const label of ['Queue', 'Accounts', 'Activity']) assert.ok(customerNav.includes(`>${label}</a>`));
+  assert.equal((customerNav.match(/class="platform-nav-link/g) || []).length, 4);
+  for (const label of ['Compose', 'Queue', 'Accounts', 'Activity']) assert.ok(customerNav.includes(`>${label}</a>`));
 });
 
 test('platform shell APIs are read-only projections of the same truth', async (t) => {

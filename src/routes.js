@@ -249,7 +249,7 @@ const renderAutoPoster = asyncRoute(async (req, res) => {
     console.warn('[routes] YouTube channels unavailable', youtubeError.message);
   }
 
-  res.render(req.path === '/private/autoposter/accounts' ? 'platform-accounts' : 'index', {
+  res.render(req.path === '/platform/autoposter/accounts' ? 'platform-accounts' : 'index', {
     appName: config.appName,
     posts,
     queueView,
@@ -327,9 +327,19 @@ router.post('/logout', requireAdminPage, (req, res) => {
   res.redirect('/admin-login?notice=You+have+been+logged+out.');
 });
 
-router.get('/', requireAdminPage, renderAutoPoster);
-router.get('/private/autoposter', requireAdminPage, renderAutoPoster);
-router.get('/private/autoposter/accounts', requireAdminPage, renderAutoPoster);
+router.get('/', requireAdminPage, (req, res) => {
+  res.redirect(302, '/platform');
+});
+router.get('/private/autoposter', requireAdminPage, (req, res) => {
+  const queryIndex = req.originalUrl.indexOf('?');
+  const query = queryIndex >= 0 ? req.originalUrl.slice(queryIndex) : '';
+  res.redirect(302, `/platform/autoposter/compose${query}`);
+});
+router.get('/private/autoposter/legacy', requireAdminPage, renderAutoPoster);
+router.get('/private/autoposter/accounts', requireAdminPage, (req, res) => {
+  res.redirect(302, '/platform/autoposter/accounts');
+});
+router.get('/platform/autoposter/accounts', requireAdminPage, renderAutoPoster);
 
 router.get('/private/autoposter/dashboard', requireAdminPage, (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'autoposter-dashboard', 'dashboard.html'));
@@ -1071,7 +1081,7 @@ router.post(
 // DEPRECATED COMPATIBILITY ADAPTER.
 //
 // The customer UI that posted here is gone: creation lives at
-// /platform/compose. This route is retained rather than deleted because it is
+// /platform/autoposter/compose. This route is retained rather than deleted because it is
 // still a live, exercised API contract (video-only media policy, multi-channel
 // fan-out, Max Scheduler offsets, recurring-daily series, duplicate-submit and
 // unknown-result handling), and because recurring-daily has no composer
@@ -1092,7 +1102,7 @@ router.post('/upload', requireAdminPage, uploadCampaignMedia, asyncRoute(async (
   // RFC 8594-style signal: honest to machine callers without breaking any of
   // them. The canonical surface is named so a caller knows where to go.
   res.set('Deprecation', 'true');
-  res.set('Link', '</platform/compose>; rel="successor-version"');
+  res.set('Link', '</platform/autoposter/compose>; rel="successor-version"');
   await resolveWebsiteCommercialContext(req);
   const userId = resolveUserId(req);
   const files = req.files || [];
@@ -1650,10 +1660,12 @@ function emptyPostCounts() {
 
 function accountSurfaceReturnTo(req) {
   const candidate = safeReturnTo(req.body && req.body.returnTo);
-  return candidate === '/private/autoposter/accounts' ? candidate : '/private/autoposter';
+  return candidate === '/platform/autoposter/accounts'
+    ? candidate
+    : '/private/autoposter/legacy';
 }
 
-function redirectWithNotice(res, notice, returnTo = '/private/autoposter') {
+function redirectWithNotice(res, notice, returnTo = '/private/autoposter/legacy') {
   const separator = returnTo.includes('?') ? '&' : '?';
   res.redirect(`${returnTo}${separator}notice=${encodeURIComponent(notice)}`);
 }

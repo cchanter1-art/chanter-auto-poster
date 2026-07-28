@@ -262,18 +262,39 @@ async function loadPlatformHealth() {
 
 // ── Pages (Greek-first, admin session) ─────────────────────────────────────
 
-router.get('/platform', requireAdminPage, asyncRoute(async (req, res) => {
-  const work = await loadPlatformWork(req);
+function autoPosterWorkItems(work) {
+  return work.items.filter((item) => {
+    const owner = platformModules.getModule(item.moduleId);
+    return owner && owner.id === 'autoposter';
+  });
+}
+
+function renderAutoPosterList(mode) {
+  return asyncRoute(async (req, res) => {
+    const work = await loadPlatformWork(req);
+    const owned = autoPosterWorkItems(work);
+    const queueMode = mode === 'queue';
+    const items = queueMode
+      ? owned.filter((item) => item.state !== platformStatus.WORK_STATE.COMPLETED)
+      : owned.filter((item) => item.evidenceAvailable);
+    res.render('platform-autoposter-list', {
+      appName: config.appName,
+      active: mode,
+      mode,
+      items,
+      platformStatus,
+      unavailable: Boolean(work.error)
+    });
+  });
+}
+
+router.get('/platform', requireAdminPage, (req, res) => {
   res.render('platform', {
     appName: config.appName,
-    active: 'overview',
-    customerModules: platformModules.listCustomerModules(),
-    internalModuleCount: platformModules.listInternalModules().length,
-    workSummary: work.summary,
-    workError: work.error,
-    workDegraded: work.degraded
+    active: 'home',
+    autoPosterModule: platformModules.getModule('autoposter')
   });
-}));
+});
 
 router.get('/platform/modules', requireAdminPage, (req, res) => {
   res.render('platform-modules', {
@@ -344,7 +365,7 @@ router.get('/platform/health', requireAdminPage, asyncRoute(async (req, res) => 
 // selected destinations is the only difference between them. What a package
 // changes is which capabilities inside this page are usable, never which page,
 // route, or product the customer receives.
-router.get('/platform/compose', requireAdminPage, asyncRoute(async (req, res) => {
+router.get('/platform/autoposter/compose', requireAdminPage, asyncRoute(async (req, res) => {
   const context = websiteContext(req);
   let destinationGroups = [];
   let selectableCount = 0;
@@ -397,7 +418,7 @@ router.get('/platform/compose', requireAdminPage, asyncRoute(async (req, res) =>
 // stays at the product level: accepted, awaiting human approval, and current
 // product state. Mission graphs, Runtime internals and control actions remain
 // behind Operator.
-router.get('/platform/compose/commands/:commandId', requireAdminPage, asyncRoute(async (req, res) => {
+router.get('/platform/autoposter/compose/commands/:commandId', requireAdminPage, asyncRoute(async (req, res) => {
   let command = null;
   let commandError = '';
   try {
@@ -427,7 +448,7 @@ router.get('/platform/compose/commands/:commandId', requireAdminPage, asyncRoute
 
 // Review + Accept: steps 5 and 6 of the same canonical flow. The human
 // approval gate lives here, on the durable record, exactly as before.
-router.get('/platform/compose/:batchId', requireAdminPage, (req, res) => {
+router.get('/platform/autoposter/compose/:batchId', requireAdminPage, (req, res) => {
   res.render('platform-batch', {
     appName: config.appName,
     active: 'compose',
@@ -440,12 +461,27 @@ router.get('/platform/compose/:batchId', requireAdminPage, (req, res) => {
 // The former bulk-only module route and its review path. Thin redirects, no
 // second implementation, absent from the primary navigation. Saved links keep
 // working and land on the canonical composer instead of a dead end.
+router.get('/platform/autoposter/queue', requireAdminPage, renderAutoPosterList('queue'));
+router.get('/platform/autoposter/activity', requireAdminPage, renderAutoPosterList('activity'));
+
 router.get('/platform/autoposter', requireAdminPage, (req, res) => {
-  res.redirect(302, '/platform/compose');
+  res.redirect(302, '/platform/autoposter/compose');
+});
+
+router.get('/platform/compose', requireAdminPage, (req, res) => {
+  res.redirect(302, '/platform/autoposter/compose');
+});
+
+router.get('/platform/compose/commands/:commandId', requireAdminPage, (req, res) => {
+  res.redirect(302, `/platform/autoposter/compose/commands/${encodeURIComponent(String(req.params.commandId || '').trim())}`);
+});
+
+router.get('/platform/compose/:batchId', requireAdminPage, (req, res) => {
+  res.redirect(302, `/platform/autoposter/compose/${encodeURIComponent(String(req.params.batchId || '').trim())}`);
 });
 
 router.get('/platform/autoposter/batches/:batchId', requireAdminPage, (req, res) => {
-  res.redirect(302, `/platform/compose/${encodeURIComponent(String(req.params.batchId || '').trim())}`);
+  res.redirect(302, `/platform/autoposter/compose/${encodeURIComponent(String(req.params.batchId || '').trim())}`);
 });
 
 // ── Shell APIs (admin session, JSON, read-only) ────────────────────────────

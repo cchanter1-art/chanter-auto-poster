@@ -110,7 +110,7 @@ test.before(async () => {
 test.after(() => new Promise((resolve) => server.close(resolve)));
 
 async function renderComposer() {
-  const response = await fetch(`${baseUrl}/platform/compose`, { headers: { Cookie: adminCookie } });
+  const response = await fetch(`${baseUrl}/platform/autoposter/compose`, { headers: { Cookie: adminCookie } });
   assert.equal(response.status, 200);
   return response.text();
 }
@@ -120,7 +120,7 @@ function youtubeChips(html) {
 }
 
 async function renderPage() {
-  const response = await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } });
+  const response = await fetch(`${baseUrl}/private/autoposter/legacy`, { headers: { Cookie: adminCookie } });
   assert.equal(response.status, 200);
   return response.text();
 }
