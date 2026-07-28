@@ -139,16 +139,17 @@ function resolveUserId(req) {
 
 function safeReturnTo(value) {
   const candidate = String(value || '').trim();
-  if (!candidate.startsWith('/') || candidate.startsWith('//')) return '/private/autoposter';
+  if (!candidate.startsWith('/') || candidate.startsWith('//')) return '/platform';
   try {
     const parsed = new URL(candidate, 'http://autoposter.local');
-    const allowedPath = parsed.pathname === '/private/autoposter'
-      || parsed.pathname === '/private/autoposter/accounts'
+    const allowedPath = parsed.pathname === '/platform'
+      || parsed.pathname.startsWith('/platform/')
+      || parsed.pathname === '/private/autoposter/legacy'
       || parsed.pathname === '/private/autoposter/dashboard'
       || parsed.pathname === '/connect/tiktok';
-    return allowedPath ? `${parsed.pathname}${parsed.search}` : '/private/autoposter';
+    return allowedPath ? `${parsed.pathname}${parsed.search}` : '/platform';
   } catch (error) {
-    return '/private/autoposter';
+    return '/platform';
   }
 }
 

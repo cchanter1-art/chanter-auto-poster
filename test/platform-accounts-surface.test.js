@@ -96,7 +96,7 @@ test('Switch preserves the existing account-selection endpoint', () => {
   const html = render();
   assert.match(html, /<summary>Switch<\/summary>/);
   assert.match(html, /action="\/private\/autoposter\/account" method="post"/);
-  assert.match(html, /name="returnTo" value="\/private\/autoposter\/accounts"/);
+  assert.match(html, /name="returnTo" value="\/platform\/autoposter\/accounts"/);
   assert.match(html, /<option value="account-b"/);
 });
 
@@ -125,7 +125,7 @@ test('provider and destructive controls remain behind Manage', () => {
 
 test('Done returns directly to the clean Composer', () => {
   const html = render();
-  assert.match(html, /class="account-action-button account-primary-action is-done" href="\/platform\/compose">Done<\/a>/);
+  assert.match(html, /class="account-action-button account-primary-action is-done" href="\/platform\/autoposter\/compose">Done<\/a>/);
 });
 
 test('no-account state makes Add Account the single dominant action and mobile CSS prevents overflow', () => {
@@ -139,10 +139,11 @@ test('no-account state makes Add Account the single dominant action and mobile C
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.accounts-actions \{ grid-template-columns: repeat\(2/);
 });
 
-test('the live customer navigation and route point at the dedicated Accounts surface', () => {
+test('the live customer navigation and routes keep Accounts inside the AutoPoster module', () => {
   const nav = fs.readFileSync(path.join(repoRoot, 'src', 'views', '_platform-nav.ejs'), 'utf8');
   const routes = fs.readFileSync(path.join(repoRoot, 'src', 'routes.js'), 'utf8');
-  assert.match(nav, /href: '\/private\/autoposter\/accounts', label: 'Accounts'/);
-  assert.match(routes, /router\.get\('\/private\/autoposter\/accounts', requireAdminPage, renderAutoPoster\)/);
-  assert.match(routes, /req\.path === '\/private\/autoposter\/accounts' \? 'platform-accounts' : 'index'/);
+  assert.match(nav, /href: '\/platform\/autoposter\/accounts', label: 'Accounts'/);
+  assert.match(routes, /router\.get\('\/platform\/autoposter\/accounts', requireAdminPage, renderAutoPoster\)/);
+  assert.match(routes, /req\.path === '\/platform\/autoposter\/accounts' \? 'platform-accounts' : 'index'/);
+  assert.match(routes, /router\.get\('\/private\/autoposter\/accounts'[\s\S]*?res\.redirect\(302, '\/platform\/autoposter\/accounts'\)/);
 });

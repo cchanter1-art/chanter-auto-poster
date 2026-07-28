@@ -161,13 +161,13 @@ test('multi-channel scheduling end-to-end at the route layer', async (t) => {
     method: 'POST',
     redirect: 'manual',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter' })
+    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter/legacy' })
   });
   const adminCookie = String(loginResponse.headers.get('set-cookie') || '').split(';')[0];
   assert.match(adminCookie, /^chanter_admin_session=/);
 
   // ── Channel picker rendering ─────────────────────────────────────────────
-  const pageResponse = await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } });
+  const pageResponse = await fetch(`${baseUrl}/private/autoposter/legacy`, { headers: { Cookie: adminCookie } });
   const pageHtml = await pageResponse.text();
   assert.equal(pageResponse.status, 200);
 

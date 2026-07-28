@@ -7,61 +7,20 @@
   <title>CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
-<body>
+<body class="platform-home">
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
 
-    <h1 class="page-title">CHANTER Platform</h1>
-    <p class="page-subtitle">
-      One platform: modules, running work, approvals and evidence in one place.
-    </p>
-
-    <% if (workError) { %>
-      <div class="notice notice-error" data-testid="work-error">Work is unavailable right now. &middot; <%= workError %></div>
-    <% } %>
-    <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
-
-    <h2 class="section-title">Work at a glance</h2>
-    <div class="stat-grid" data-testid="overview-summary">
-      <a class="stat-tile" href="/platform/work" data-stat="running">
-        <div class="stat-value"><%= workSummary.running %></div>
-        <div class="stat-label">Running</div>
+    <main class="platform-home-main">
+      <h1>CHANTER</h1>
+      <a class="platform-home-module" href="/platform/autoposter/compose" data-module="<%= autoPosterModule.id %>">
+        AutoPoster
       </a>
-      <a class="stat-tile" href="/platform/approvals" data-stat="awaiting-approval">
-        <div class="stat-value"><%= workSummary.awaitingApproval %></div>
-        <div class="stat-label">Waiting for approval</div>
-      </a>
-      <a class="stat-tile" href="/platform/work" data-stat="failed">
-        <div class="stat-value"><%= workSummary.failed %></div>
-        <div class="stat-label">Failed</div>
-      </a>
-      <a class="stat-tile" href="/platform/health" data-stat="modules">
-        <div class="stat-value"><%= customerModules.length %></div>
-        <div class="stat-label">Active modules</div>
-      </a>
-    </div>
-
-    <h2 class="section-title">Modules</h2>
-    <p class="section-note">AutoPoster is the platform's first active module.</p>
-    <div class="module-grid">
-      <% customerModules.forEach(function (module, index) { %>
-        <a class="module-card<%= index === 0 ? '' : ' secondary' %>" href="<%= module.href %>" data-module="<%= module.id %>">
-          <div class="module-card-head">
-            <div class="module-name"><%= module.name %></div>
-            <span class="chip chip-ready">Active</span>
-          </div>
-          <div class="module-desc"><%= module.summary %></div>
-        </a>
-      <% }); %>
-    </div>
-    <p class="section-note" style="margin-top:14px">
-      A further <%= internalModuleCount %> internal modules run behind Operator and are not controlled from here.
-      <a href="/platform/modules">See all modules</a>
-    </p>
-
-    <p class="footer-note">
-      Nothing publishes without human approval.
-    </p>
+      <nav class="platform-home-actions" aria-label="Platform destinations">
+        <a href="/platform/autoposter/activity">Activity</a>
+        <a href="/platform/autoposter/accounts">Account</a>
+      </nav>
+    </main>
   </div>
 </body>
 </html>

@@ -140,7 +140,7 @@ test('image intake is refused on every creation path; video intake passes', asyn
     method: 'POST',
     redirect: 'manual',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter' })
+    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter/legacy' })
   });
   const adminCookie = String(loginResponse.headers.get('set-cookie') || '').split(';')[0];
   assert.match(adminCookie, /^chanter_admin_session=/);
@@ -148,7 +148,7 @@ test('image intake is refused on every creation path; video intake passes', asyn
   // ── The console no longer picks files at all ─────────────────────────────
   // The video-only RULE is server-side and unchanged (proven below); what left
   // this page is the picker, along with the rest of the intake form.
-  const intakeHtml = await (await fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } })).text();
+  const intakeHtml = await (await fetch(`${baseUrl}/private/autoposter/legacy`, { headers: { Cookie: adminCookie } })).text();
   assert.doesNotMatch(intakeHtml, /<input[^>]*type="file"/, 'no file picker remains on the dashboard');
   assert.doesNotMatch(intakeHtml, /accept="video/);
   assert.doesNotMatch(intakeHtml, /accept="image/);
@@ -188,7 +188,7 @@ test('image intake is refused on every creation path; video intake passes', asyn
     body: mediaForm({ caption: 'URL try', publicMediaUrl: 'https://cdn.example.com/photo.jpg' })
   });
   assert.equal(imageUrlUpload.status, 302);
-  assert.equal(decodeURIComponent(imageUrlUpload.headers.get('location')), `/private/autoposter?notice=${VIDEO_ONLY_URL_MESSAGE}`);
+  assert.equal(decodeURIComponent(imageUrlUpload.headers.get('location')), `/private/autoposter/legacy?notice=${VIDEO_ONLY_URL_MESSAGE}`);
   assert.equal(addUploadedPostsCalls.length, 0);
 
   const videoUrlUpload = await fetch(`${baseUrl}/upload`, {

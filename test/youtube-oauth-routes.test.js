@@ -259,7 +259,7 @@ test('connect redirects to Google with code flow, offline access, PKCE, exact re
 test('an arbitrary returnTo is replaced with a validated internal path', async () => {
   resetScenario();
   const { state } = await startOAuth('?returnTo=https%3A%2F%2Fevil.example.com%2Fphish');
-  assert.equal(stateRecords.get(state).returnTo, '/private/autoposter');
+  assert.equal(stateRecords.get(state).returnTo, '/platform');
 });
 
 test('valid callback connects the single channel with encrypted custody and returns to the site', async () => {

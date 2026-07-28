@@ -311,7 +311,7 @@ test('a customer module keeps links that stay inside its own declared route', as
   registry.register(createAutoPosterWorkProvider({ listBatches: async () => ({ batches: AUTOPOSTER_BATCHES }) }));
   const collected = await registry.collect({});
   for (const item of collected.items) {
-    assert.equal(item.href, `/platform/compose/${item.workId}`);
+    assert.equal(item.href, `/platform/autoposter/compose/${item.workId}`);
     assert.equal(item.actionable, true);
   }
 });
@@ -422,7 +422,7 @@ test('linked Operator command, graph, and AutoPoster runtime job project as one 
   assert.equal(item.workId, commandId);
   assert.equal(item.runtimeGraphId, graphId);
   assert.equal(item.productJobId, 'runtime-job-1');
-  assert.equal(item.href, `/platform/compose/commands/${commandId}`);
+  assert.equal(item.href, `/platform/autoposter/compose/commands/${commandId}`);
   assert.equal(item.actionable, true);
   assert.equal(item.stateReason, 'Draft scheduled; waiting for human publication approval.');
   assert.doesNotMatch(item.stateReason, /Operator|internal control|recovery/i);
@@ -458,7 +458,7 @@ test('a graphless accepted command remains visible as AutoPoster work with a saf
   assert.equal(item.state, WORK_STATE.FAILED);
   assert.equal(item.stateReason, 'Accepted AutoPoster work failed before a product draft was created.');
   assert.doesNotMatch(item.stateReason, /Operator|graph|mission|internal/i);
-  assert.equal(item.href, `/platform/compose/commands/${commandId}`);
+  assert.equal(item.href, `/platform/autoposter/compose/commands/${commandId}`);
   assert.equal(item.actionable, true);
 });
 

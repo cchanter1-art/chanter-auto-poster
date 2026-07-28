@@ -87,7 +87,7 @@ function projectAutoPosterBatch(record = {}) {
     // The Approvals surface keys off this alone, so approval never appears for
     // work that has nothing left for a human to accept.
     needsApproval: state === WORK_STATE.WAITING_APPROVAL && awaiting > 0,
-    href: batchId ? `/platform/compose/${encodeURIComponent(batchId)}` : '',
+    href: batchId ? `/platform/autoposter/compose/${encodeURIComponent(batchId)}` : '',
     createdAt: String(record.createdAt || ''),
     updatedAt: String(record.updatedAt || record.createdAt || ''),
     // Every batch carries a durable record, so every batch is indexable on the
@@ -204,7 +204,7 @@ function projectRecurringSeries(series = {}) {
     needsApproval: state === WORK_STATE.WAITING_APPROVAL && awaiting > 0,
     // Occurrences are ordinary queue jobs, reviewed and approved in the Release
     // Queue — the surface the publishing-queue module already owns.
-    href: '/private/autoposter',
+    href: '/platform/autoposter/queue',
     createdAt: String(series.createdAt || ''),
     updatedAt: String(series.updatedAt || series.createdAt || ''),
     evidenceAvailable: true,

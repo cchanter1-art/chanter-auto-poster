@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title><%= mode === 'queue' ? 'Queue' : 'Activity' %> — CHANTER Platform</title>
+  <link rel="stylesheet" href="/platform/platform.css">
+</head>
+<body class="customer-module-list">
+  <div class="shell customer-shell">
+    <%- include('_platform-nav', { active: mode }) %>
+
+    <main class="module-list-main">
+      <h1><%= mode === 'queue' ? 'Queue' : 'Activity' %></h1>
+
+      <% if (unavailable) { %>
+        <div class="module-list-notice" role="status">
+          <%= mode === 'queue' ? 'Queue is unavailable.' : 'Activity is unavailable.' %>
+        </div>
+      <% } %>
+
+      <% if (items.length === 0) { %>
+        <div class="module-list-empty">
+          <%= mode === 'queue' ? 'Nothing queued.' : 'No activity yet.' %>
+        </div>
+      <% } else { %>
+        <div class="module-list-items">
+          <% items.forEach((item) => { const state = platformStatus.presentation(item.state); %>
+            <% if (item.href) { %>
+              <a class="module-list-item" href="<%= item.href %>">
+                <strong><%= item.title %></strong>
+                <span><%= state.label %></span>
+              </a>
+            <% } else { %>
+              <div class="module-list-item">
+                <strong><%= item.title %></strong>
+                <span><%= state.label %></span>
+              </div>
+            <% } %>
+          <% }); %>
+        </div>
+      <% } %>
+    </main>
+  </div>
+</body>
+</html>

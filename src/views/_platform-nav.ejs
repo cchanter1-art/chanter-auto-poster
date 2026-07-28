@@ -10,7 +10,7 @@
 // second posting entry: one account and many accounts are the same workflow.
 const platformNavItems = [
   { id: 'overview',  href: '/platform',           label: 'Overview' },
-  { id: 'compose',   href: '/platform/compose',   label: 'Compose' },
+  { id: 'compose',   href: '/platform/autoposter/compose', label: 'AutoPoster' },
   { id: 'modules',   href: '/platform/modules',   label: 'Modules' },
   { id: 'work',      href: '/platform/work',      label: 'Work' },
   { id: 'approvals', href: '/platform/approvals', label: 'Approvals' },
@@ -18,33 +18,38 @@ const platformNavItems = [
   { id: 'health',    href: '/platform/health',    label: 'System health' }
 ];
 const customerNavItems = [
-  { id: 'queue',    href: '/private/autoposter#queue',    label: 'Queue' },
-  { id: 'accounts', href: '/private/autoposter/accounts', label: 'Accounts' },
-  { id: 'activity', href: '/private/autoposter#activity', label: 'Activity' }
+  { id: 'compose',  href: '/platform/autoposter/compose',  label: 'Compose' },
+  { id: 'queue',    href: '/platform/autoposter/queue',    label: 'Queue' },
+  { id: 'accounts', href: '/platform/autoposter/accounts', label: 'Accounts' },
+  { id: 'activity', href: '/platform/autoposter/activity', label: 'Activity' }
 ];
-const customerSurface = active === 'compose' || active === 'accounts';
-const navItems = customerSurface ? customerNavItems : platformNavItems;
+const customerSurface = ['compose', 'queue', 'accounts', 'activity'].includes(active);
+const navItems = active === 'home' ? [] : (customerSurface ? customerNavItems : platformNavItems);
 %>
 <header class="platform-header">
-  <a class="brand" href="<%= customerSurface ? '/platform/compose' : '/platform' %>" aria-label="CHANTER <%= customerSurface ? 'AutoPoster' : 'Platform' %>">
-    <span class="wordmark">CHANTER</span>
-    <span class="product"><%= customerSurface ? 'AutoPoster' : 'Platform' %></span>
-  </a>
+  <div class="brand-context">
+    <a class="brand" href="/platform" aria-label="CHANTER Platform">
+      <span class="wordmark">CHANTER</span>
+      <span class="product">Platform</span>
+    </a>
+    <% if (customerSurface) { %><span class="module-context">AutoPoster</span><% } %>
+  </div>
   <nav class="header-nav">
-    <% if (!customerSurface) { %><a href="/private/autoposter">Classic console</a><% } %>
     <form method="post" action="/logout" style="display:inline">
       <button type="submit" class="btn btn-quiet" style="padding:0;font-size:13.5px">Sign out</button>
     </form>
   </nav>
 </header>
 
-<nav class="platform-nav<%= customerSurface ? ' customer-nav' : '' %>" aria-label="<%= customerSurface ? 'AutoPoster' : 'CHANTER Platform' %>">
-  <% for (const item of navItems) { %>
-    <a
-      class="platform-nav-link<%= active === item.id ? ' platform-nav-link-active' : '' %>"
-      href="<%= item.href %>"
-      data-nav="<%= item.id %>"
-      <%- active === item.id ? 'aria-current="page"' : '' %>
-    ><%= item.label %></a>
-  <% } %>
-</nav>
+<% if (navItems.length > 0) { %>
+  <nav class="platform-nav<%= customerSurface ? ' customer-nav' : '' %>" aria-label="<%= customerSurface ? 'AutoPoster' : 'CHANTER Platform' %>">
+    <% for (const item of navItems) { %>
+      <a
+        class="platform-nav-link<%= active === item.id ? ' platform-nav-link-active' : '' %>"
+        href="<%= item.href %>"
+        data-nav="<%= item.id %>"
+        <%- active === item.id ? 'aria-current="page"' : '' %>
+      ><%= item.label %></a>
+    <% } %>
+  </nav>
+<% } %>

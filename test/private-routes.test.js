@@ -155,7 +155,7 @@ const { installCommercialFixture } = require('./helpers/commercial-fixture');
 installCommercialFixture(require('../src/commercialService'), storage);
 const routes = require('../src/routes');
 
-test('serves the AutoPoster page and dashboard at both private routes', async (t) => {
+test('serves the explicit legacy AutoPoster console and private dashboard', async (t) => {
   const app = express();
   app.set('view engine', 'ejs');
   app.set('views', path.join(__dirname, '..', 'src', 'views'));
@@ -222,7 +222,7 @@ test('serves the AutoPoster page and dashboard at both private routes', async (t
     method: 'POST',
     redirect: 'manual',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ password: 'incorrect-password', returnTo: '/private/autoposter' })
+    body: new URLSearchParams({ password: 'incorrect-password', returnTo: '/private/autoposter/legacy' })
   });
   assert.equal(failedLogin.status, 401);
   assert.equal(failedLogin.headers.get('set-cookie'), null);
@@ -231,17 +231,17 @@ test('serves the AutoPoster page and dashboard at both private routes', async (t
     method: 'POST',
     redirect: 'manual',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter' })
+    body: new URLSearchParams({ password: 'test-admin-password-123', returnTo: '/private/autoposter/legacy' })
   });
   const adminCookie = String(loginResponse.headers.get('set-cookie') || '').split(';')[0];
   assert.equal(loginResponse.status, 302);
-  assert.equal(loginResponse.headers.get('location'), '/private/autoposter');
+  assert.equal(loginResponse.headers.get('location'), '/private/autoposter/legacy');
   assert.match(adminCookie, /^chanter_admin_session=/);
   assert.match(String(loginResponse.headers.get('set-cookie')), /HttpOnly/i);
   assert.match(String(loginResponse.headers.get('set-cookie')), /SameSite=Lax/i);
 
   const [autoPosterResponse, dashboardResponse] = await Promise.all([
-    fetch(`${baseUrl}/private/autoposter`, { headers: { Cookie: adminCookie } }),
+    fetch(`${baseUrl}/private/autoposter/legacy`, { headers: { Cookie: adminCookie } }),
     fetch(`${baseUrl}/private/autoposter/dashboard`, { headers: { Cookie: adminCookie } })
   ]);
   const [autoPosterHtml, dashboardHtml] = await Promise.all([
@@ -408,7 +408,7 @@ test('serves the AutoPoster page and dashboard at both private routes', async (t
   assert.equal(switchResponse.status, 302);
   assert.match(accountCookie, /autoposter_tiktok_account_id=account-b/);
 
-  const accountBResponse = await fetch(`${baseUrl}/private/autoposter`, {
+  const accountBResponse = await fetch(`${baseUrl}/private/autoposter/legacy`, {
     headers: { Cookie: `${adminCookie}; ${accountCookie}` }
   });
   const accountBHtml = await accountBResponse.text();

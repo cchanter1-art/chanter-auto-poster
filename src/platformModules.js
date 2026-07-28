@@ -26,8 +26,13 @@ const SURFACE_INTERNAL = 'internal';
 const STATE_ACTIVE = 'active';
 const STATE_INTERNAL = 'internal';
 
-// Ordered: the customer-reachable modules come first, AutoPoster first of all,
-// because the Overview and Modules pages render this order verbatim.
+// The public registry contains one customer module. `publishing-queue` remains
+// a compatibility ID for its existing read provider, but resolves to
+// AutoPoster ownership and is never listed as a second product module.
+const MODULE_ALIASES = Object.freeze({
+  'publishing-queue': 'autoposter'
+});
+
 const MODULES = Object.freeze([
   {
     id: 'autoposter',
@@ -35,22 +40,9 @@ const MODULES = Object.freeze([
     surface: SURFACE_CUSTOMER,
     state: STATE_ACTIVE,
     owner: 'CHANTER Platform',
-    // The canonical composer. One posting workflow for one account and for
-    // many; the package decides which capabilities inside it are usable, not
-    // which route the customer gets.
-    href: '/platform/compose',
+    // The module namespace owns Compose, Queue, Accounts and Activity.
+    href: '/platform/autoposter',
     summary: 'One composer: upload, accounts, caption, schedule, review, accept.'
-  },
-  {
-    id: 'publishing-queue',
-    name: 'Publishing queue',
-    surface: SURFACE_CUSTOMER,
-    state: STATE_ACTIVE,
-    owner: 'CHANTER Platform',
-    // Observing work, not creating it: connected channels, release queue and
-    // publish history stay here, outside the composer.
-    href: '/private/autoposter',
-    summary: 'Connected channels, release queue, publish history.'
   },
   {
     id: 'operator',
@@ -139,7 +131,9 @@ function listInternalModules() {
 }
 
 function getModule(id) {
-  return MODULES.find((module) => module.id === String(id || '')) || null;
+  const requested = String(id || '');
+  const resolved = MODULE_ALIASES[requested] || requested;
+  return MODULES.find((module) => module.id === resolved) || null;
 }
 
 // The module that owns a unit of work, resolved for display. Unknown ids fall
