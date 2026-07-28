@@ -11,6 +11,7 @@ const {
 } = require('./operationalHistoryArchive');
 
 const AUTHORITY_MODE = 'firestore_emulator';
+const CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID = 'demo-chanter-autoposter-archive';
 const DEFAULT_COLLECTIONS = Object.freeze({
   posts: 'posts',
   postBatches: 'postBatches',
@@ -68,9 +69,9 @@ function assertFirestoreEmulatorSafety({
       'firestore_emulator_host_invalid'
     );
   }
-  if (!exactProjectId.startsWith('demo-')) {
+  if (exactProjectId !== CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID) {
     throw emulatorSafetyError(
-      'Operational history archive accepts only a Firebase demo project ID.',
+      `Operational history archive accepts only ${CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID}.`,
       'firestore_demo_project_required'
     );
   }
@@ -285,6 +286,7 @@ function createFirestoreEmulatorArchiveCommandService({
 
 module.exports = {
   AUTHORITY_MODE,
+  CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID,
   DEFAULT_COLLECTIONS,
   assertFirestoreEmulatorSafety,
   authorityDocumentId,

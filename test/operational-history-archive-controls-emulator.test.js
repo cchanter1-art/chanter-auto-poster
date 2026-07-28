@@ -16,6 +16,7 @@ const {
 } = require('../src/operationalHistoryArchive');
 const {
   AUTHORITY_MODE,
+  CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID,
   assertFirestoreEmulatorSafety,
   authorityDocumentId,
   createEmulatorFirestore,
@@ -42,7 +43,7 @@ const OWNER_ID = 'owner-controls';
 const APPROVAL_SECRET = 'founder-control-approval-secret-32-bytes-minimum';
 const SECRET_CANARY = 'FOUNDERS-ONLY-SECRET-CANARY';
 const EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '';
-const PROJECT_ID = process.env.GCLOUD_PROJECT || 'demo-chanter-autoposter-archive';
+const PROJECT_ID = process.env.GCLOUD_PROJECT || '';
 
 function fixture() {
   return JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'));
@@ -137,6 +138,8 @@ if (!EMULATOR_HOST) {
   });
 } else {
   test('founder control surface drives the exact emulator archive flow', async (t) => {
+    assert.equal(PROJECT_ID, CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID);
+    assert.equal(process.env.FIREBASE_PROJECT_ID, CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID);
     const { db } = createEmulatorFirestore({
       emulatorHost: EMULATOR_HOST,
       projectId: PROJECT_ID,

@@ -11,6 +11,7 @@ const {
 } = require('../src/operationalHistoryArchive');
 const {
   AUTHORITY_MODE,
+  CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID,
   assertFirestoreEmulatorSafety,
   authorityDocumentId,
   createEmulatorFirestore,
@@ -24,7 +25,7 @@ const FIXTURE_PATH = path.join(__dirname, 'fixtures', 'operational-history-archi
 const NOW = '2026-07-28T12:00:00.000Z';
 const APPROVAL_SECRET = 'emulator-founder-approval-secret-32-bytes-minimum';
 const EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '';
-const PROJECT_ID = process.env.GCLOUD_PROJECT || 'demo-chanter-autoposter-archive';
+const PROJECT_ID = process.env.GCLOUD_PROJECT || '';
 
 function fixture() {
   return JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'));
@@ -162,8 +163,16 @@ if (!EMULATOR_HOST) {
     await t.test('emulator and demo-project configuration are mandatory', () => {
       assert.equal(safety.authorityMode, AUTHORITY_MODE);
       assert.equal(safety.emulatorHost, EMULATOR_HOST);
-      assert.equal(safety.projectId, PROJECT_ID);
-      assert.equal(app.options.projectId, PROJECT_ID);
+      assert.equal(safety.projectId, CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID);
+      assert.equal(app.options.projectId, CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID);
+      for (const name of [
+        'GCLOUD_PROJECT',
+        'GOOGLE_CLOUD_PROJECT',
+        'FIREBASE_PROJECT_ID',
+        'VITE_FIREBASE_PROJECT_ID'
+      ]) {
+        assert.equal(process.env[name], CANONICAL_ARCHIVE_EMULATOR_PROJECT_ID);
+      }
       assert.throws(
         () => assertFirestoreEmulatorSafety({ emulatorHost: '', projectId: PROJECT_ID }),
         (error) => error.code === 'firestore_emulator_required'
@@ -179,6 +188,13 @@ if (!EMULATOR_HOST) {
         () => assertFirestoreEmulatorSafety({
           emulatorHost: EMULATOR_HOST,
           projectId: 'chanter-site'
+        }),
+        (error) => error.code === 'firestore_demo_project_required'
+      );
+      assert.throws(
+        () => assertFirestoreEmulatorSafety({
+          emulatorHost: EMULATOR_HOST,
+          projectId: 'demo-other-project'
         }),
         (error) => error.code === 'firestore_demo_project_required'
       );
