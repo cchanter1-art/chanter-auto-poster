@@ -131,17 +131,20 @@ test('secondary capability is preserved behind one options disclosure', () => {
   assert.doesNotMatch(html, /<details id="customer-options"[^>]*\sopen/);
 });
 
-test('canonical acceptance collapses to a compact success and errors expose one recovery action', () => {
+test('batch acceptance continues to review while other accepted work stays compact', () => {
   const html = renderComposer();
   assert.match(html, /fetch\('\/api\/platform\/batches', \{ method: 'POST'/);
-  assert.match(html, /payload && payload\.ok && \(acceptedCommand \|\| payload\.batch \|\| payload\.series\)/);
+  assert.match(html, /payload && payload\.ok && acceptedBatchId/);
+  assert.match(html, /window\.location\.assign\(/);
+  assert.match(html, /\/platform\/autoposter\/compose\/' \+ encodeURIComponent/);
+  assert.match(html, /payload && payload\.ok && \(acceptedCommand \|\| payload\.series\)/);
   assert.match(html, /form\.classList\.add\('hidden'\)/);
   assert.match(html, /success\.classList\.remove\('hidden'\)/);
   assert.match(html, /<strong id="success-message" tabindex="-1">✓ Scheduled<\/strong>/);
   assert.match(html, />View Queue<\/a>/);
-  assert.match(html, /showNotice\('Could not schedule '/);
+  assert.match(html, /showNotice\(\s*'Could not schedule '/);
+  assert.match(html, /Review the highlighted fields and try again/);
   assert.match(html, /review\.textContent = 'Review'/);
-  assert.doesNotMatch(html, /window\.location\.href/);
   assert.doesNotMatch(html, /\/api\/instagram\/publish|\/posts\/[^']*\/prepare/);
 });
 

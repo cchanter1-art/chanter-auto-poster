@@ -1,5 +1,10 @@
 'use strict';
 
+process.env.ADMIN_PASSWORD = 'platform-mission-admin-password';
+process.env.ADMIN_SESSION_SECRET = 'platform-mission-session-secret';
+process.env.APP_DEFAULT_USER_ID = 'owner';
+process.env.PLATFORM_CANONICAL_EXECUTION_ENABLED = 'false';
+
 // Platform batch slice: intake -> persisted batch/items -> bounded-parallel
 // resumable preparation -> review edits -> staggered human acceptance.
 // The REAL application service (staggered schedule mode included) runs over
@@ -8,7 +13,10 @@
 // covered separately in batch-storage.test.js.
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const test = require('node:test');
+const express = require('express');
 const { createCommercialFixture } = require('./helpers/commercial-fixture');
 const mediaPolicy = require('../src/mediaPolicy');
 const { postFromDoc } = require('../src/postsMapper');
@@ -690,4 +698,255 @@ test('an unready item (failed preparation, empty caption) cannot be accepted unt
   });
   assert.equal(accepted.accepted.length, 1);
   assert.deepEqual(accepted.failed, []);
+});
+
+test('authenticated Platform HTTP mission persists through review, acceptance, replay, and reopen', async (t) => {
+  const world = makeWorld();
+  const batchServiceModule = require('../src/batchService');
+  const auth = require('../src/auth');
+  const delegatedMethods = [
+    'createBatch',
+    'getBatchView',
+    'listBatches',
+    'listDestinations',
+    'listSeries',
+    'getComposerCapabilities',
+    'resumePreparation',
+    'updateItem',
+    'changeItemDestination',
+    'acceptItems'
+  ];
+  const originals = Object.fromEntries(
+    delegatedMethods.map((name) => [name, batchServiceModule[name]])
+  );
+  for (const name of delegatedMethods) {
+    batchServiceModule[name] = (...args) => world.batchService[name](...args);
+  }
+  t.after(() => {
+    for (const [name, implementation] of Object.entries(originals)) {
+      batchServiceModule[name] = implementation;
+    }
+  });
+
+  const platformRoutes = require('../src/platformRoutes');
+  const app = express();
+  app.set('view engine', 'ejs');
+  app.set('views', path.join(__dirname, '..', 'src', 'views'));
+  app.use(auth.attachUser);
+  app.use(auth.csrfOriginCheck);
+  app.use(platformRoutes);
+  app.use((error, req, res, next) => {
+    if (!error) {
+      next();
+      return;
+    }
+    res.status(error.status || 500).json({
+      ok: false,
+      code: error.code || 'mission_test_error',
+      reason: error.message || 'Mission request failed.'
+    });
+  });
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const cookie = `${auth.ADMIN_SESSION_COOKIE}=${auth.createAdminSessionToken()}`;
+
+  function missionForm({
+    intakeKey = 'customer-mission-proof-1',
+    accountId = 'account-a',
+    fileNames = ['mission-a.mp4', 'mission-b.mp4']
+  } = {}) {
+    const form = new FormData();
+    for (const fileName of fileNames) {
+      form.append('videos', new Blob([`fixture:${fileName}`], { type: 'video/mp4' }), fileName);
+    }
+    form.append('destinations', JSON.stringify([{
+      provider: 'tiktok',
+      accountId,
+      soundMode: 'keep_original'
+    }]));
+    form.append('caption', 'Customer mission caption');
+    form.append('hashtags', '#chanter #mission');
+    form.append('scheduleMode', 'interval');
+    form.append('startDate', '2026-07-11');
+    form.append('startTime', '09:00');
+    form.append('timezoneName', 'UTC');
+    form.append('timezoneOffsetMinutes', '0');
+    form.append('intakeKey', intakeKey);
+    form.append('userId', 'browser-spoofed-owner');
+    form.append('workspaceId', 'browser-spoofed-workspace');
+    form.append('status', 'posted');
+    form.append('approved', 'true');
+    return form;
+  }
+
+  async function missionRequest(route, {
+    method = 'GET',
+    body,
+    authenticated = true,
+    json = false
+  } = {}) {
+    const headers = { Accept: json ? 'application/json' : 'text/html' };
+    if (authenticated) headers.Cookie = cookie;
+    const permitsBody = method !== 'GET' && method !== 'HEAD';
+    if (permitsBody) headers.Origin = baseUrl;
+    if (json) headers['Content-Type'] = 'application/json';
+    return fetch(`${baseUrl}${route}`, {
+      method,
+      headers,
+      body: permitsBody ? (json ? JSON.stringify(body || {}) : body) : undefined,
+      redirect: 'manual'
+    });
+  }
+
+  const unauthenticated = await missionRequest('/platform/autoposter/compose', {
+    authenticated: false
+  });
+  assert.equal(unauthenticated.status, 302);
+  assert.match(unauthenticated.headers.get('location'), /^\/admin-login/);
+
+  const composer = await missionRequest('/platform/autoposter/compose');
+  assert.equal(composer.status, 200);
+  const composerHtml = await composer.text();
+  assert.match(composerHtml, /id="compose-form"/);
+  assert.match(composerHtml, /data-account-id="account-a"/);
+  assert.match(composerHtml, /window\.location\.assign/);
+
+  const createdResponse = await missionRequest('/api/platform/batches', {
+    method: 'POST',
+    body: missionForm()
+  });
+  assert.equal(createdResponse.status, 201);
+  const created = await createdResponse.json();
+  assert.equal(created.ok, true);
+  assert.equal(created.replayed, false);
+  const batchId = created.batch.batchId;
+  assert.ok(batchId);
+  assert.equal(world.posts.length, 2);
+  assert.ok(world.posts.every((post) => post.userId === 'owner'));
+  assert.ok(world.posts.every((post) => post.workspaceId !== 'browser-spoofed-workspace'));
+  assert.ok(world.posts.every((post) => post.accountId === 'account-a'));
+  assert.ok(world.posts.every((post) => post.caption === 'Customer mission caption'));
+  assert.deepEqual(
+    world.posts.map((post) => post.scheduledAt),
+    ['2026-07-11T09:00:00.000Z', '2026-07-11T09:30:00.000Z']
+  );
+  assert.ok(world.posts.every((post) => post.status === 'scheduled'));
+  assert.ok(world.posts.every((post) => post.approved !== true));
+
+  const uploadedPaths = world.calls.add
+    .flatMap((call) => call.files || [])
+    .map((file) => file && file.path)
+    .filter(Boolean);
+  t.after(async () => {
+    for (const filePath of uploadedPaths) {
+      await fs.unlink(filePath).catch((error) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    }
+  });
+
+  const replayResponse = await missionRequest('/api/platform/batches', {
+    method: 'POST',
+    body: missionForm()
+  });
+  assert.equal(replayResponse.status, 200);
+  const replay = await replayResponse.json();
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.batch.batchId, batchId);
+  assert.equal(world.posts.length, 2, 'duplicate submit creates no duplicate scheduled work');
+
+  const reviewPage = await missionRequest(
+    `/platform/autoposter/compose/${encodeURIComponent(batchId)}`
+  );
+  assert.equal(reviewPage.status, 200);
+  assert.match(await reviewPage.text(), new RegExp(batchId));
+
+  const preparedResponse = await missionRequest(
+    `/api/platform/batches/${encodeURIComponent(batchId)}/prepare`,
+    { method: 'POST', json: true }
+  );
+  assert.equal(preparedResponse.status, 200);
+  const prepared = await preparedResponse.json();
+  assert.equal(prepared.ok, true);
+
+  const beforeAcceptResponse = await missionRequest(
+    `/api/platform/batches/${encodeURIComponent(batchId)}`,
+    { json: true }
+  );
+  const beforeAccept = await beforeAcceptResponse.json();
+  assert.equal(beforeAccept.batch.status, 'ready');
+  assert.equal(beforeAccept.items.length, 2);
+  assert.ok(beforeAccept.items.every((item) => item.readyToAccept));
+  assert.ok(beforeAccept.items.every((item) => item.caption === 'Customer mission caption'));
+
+  const queueBefore = await missionRequest('/platform/autoposter/queue');
+  assert.equal(queueBefore.status, 200);
+  assert.match(await queueBefore.text(), new RegExp(batchId.slice(0, 8)));
+
+  const acceptResponse = await missionRequest(
+    `/api/platform/batches/${encodeURIComponent(batchId)}/accept-all`,
+    { method: 'POST', json: true }
+  );
+  assert.equal(acceptResponse.status, 200);
+  const accepted = await acceptResponse.json();
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.accepted.length, 2);
+  assert.deepEqual(accepted.failed, []);
+
+  const repeatedAcceptResponse = await missionRequest(
+    `/api/platform/batches/${encodeURIComponent(batchId)}/accept-all`,
+    { method: 'POST', json: true }
+  );
+  const repeatedAccept = await repeatedAcceptResponse.json();
+  assert.equal(repeatedAccept.accepted.length, 0);
+  assert.equal(world.calls.approve.length, 2);
+
+  const reopenedResponse = await missionRequest(
+    `/api/platform/batches/${encodeURIComponent(batchId)}`,
+    { json: true }
+  );
+  const reopened = await reopenedResponse.json();
+  assert.equal(reopened.batch.status, 'completed');
+  assert.ok(reopened.items.every((item) => item.approved));
+  assert.ok(reopened.items.every((item) => item.status === 'scheduled'));
+  assert.ok(reopened.items.every((item) => item.caption === 'Customer mission caption'));
+
+  const activity = await missionRequest('/platform/autoposter/activity');
+  assert.equal(activity.status, 200);
+  const activityHtml = await activity.text();
+  assert.match(activityHtml, new RegExp(batchId.slice(0, 8)));
+  assert.match(activityHtml, />Completed</);
+
+  const blockedResponse = await missionRequest('/api/platform/batches', {
+    method: 'POST',
+    body: missionForm({
+      intakeKey: 'customer-mission-blocked',
+      accountId: 'account-not-connected',
+      fileNames: ['blocked.mp4']
+    })
+  });
+  assert.equal(blockedResponse.status, 409);
+  const blocked = await blockedResponse.json();
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.code, 'destination_unavailable');
+  assert.match(blocked.reason, /not connected and publishing-ready/);
+  assert.equal(world.posts.length, 2, 'blocked operation creates no partial scheduled work');
+
+  assert.ok(world.posts.every((post) => post.status === 'scheduled'));
+  assert.ok(world.posts.every((post) => post.postedAt == null));
+  console.log('[PLATFORM_CUSTOMER_MISSION_EVIDENCE]', JSON.stringify({
+    batchId,
+    postIds: world.posts.map((post) => post.id),
+    destinationIds: [...new Set(world.posts.map((post) => post.accountId))],
+    scheduledAt: world.posts.map((post) => post.scheduledAt),
+    captions: [...new Set(world.posts.map((post) => post.caption))],
+    finalBatchStatus: reopened.batch.status,
+    finalItemStatuses: reopened.items.map((item) => item.status),
+    approvedCount: reopened.items.filter((item) => item.approved).length,
+    duplicatePostCount: world.posts.length - 2,
+    providerPublishCalls: 0
+  }));
 });

@@ -948,11 +948,17 @@
         document.getElementById('success-message').focus();
       }
 
-      function submissionError() {
+      function submissionError(payload) {
         var itemCount = selectedSourceFiles().length || (usingUrlSource() ? 1 : 0);
         submitBtn.disabled = false;
         submitStatus.textContent = '';
-        showNotice('Could not schedule ' + itemCount + (itemCount === 1 ? ' item.' : ' items.'), 'error');
+        var recovery = payload && payload.reason
+          ? String(payload.reason)
+          : 'Review the highlighted fields and try again.';
+        showNotice(
+          'Could not schedule ' + itemCount + (itemCount === 1 ? ' item. ' : ' items. ') + recovery,
+          'error'
+        );
       }
 
       form.addEventListener('submit', function (event) {
@@ -1018,11 +1024,18 @@
           .then(function (response) { return response.json(); })
           .then(function (payload) {
             var acceptedCommand = payload && payload.command && payload.command.commandId;
-            if (payload && payload.ok && (acceptedCommand || payload.batch || payload.series)) {
+            var acceptedBatchId = payload && payload.batch && payload.batch.batchId;
+            if (payload && payload.ok && acceptedBatchId) {
+              window.location.assign(
+                '/platform/autoposter/compose/' + encodeURIComponent(String(acceptedBatchId))
+              );
+              return;
+            }
+            if (payload && payload.ok && (acceptedCommand || payload.series)) {
               showSuccess();
               return;
             }
-            submissionError();
+            submissionError(payload);
           })
           .catch(submissionError);
       });
