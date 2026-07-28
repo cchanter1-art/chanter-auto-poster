@@ -295,7 +295,7 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   assert.ok(pages['/platform/health'].includes('Approval required'));
 });
 
-test('the platform shell is English-only and leaves legacy module copy alone', async (t) => {
+test('the platform shell and customer composer are English-only', async (t) => {
   const originalListBatches = batchService.listBatches;
   batchService.listBatches = async () => ({ batches: BATCH_RECORDS });
   const server = await startServer();
@@ -329,14 +329,19 @@ test('the platform shell is English-only and leaves legacy module copy alone', a
     assert.equal(GREEK_CHARACTERS.test(`${item.title} ${item.stateReason}`), false, `${record.batchId} projection must be English`);
   }
 
-  // 3. The AutoPoster module page — now the canonical composer — is Greek-first
-  //    product copy and is EXCLUDED from the rule above; only the shell chrome
-  //    it inherits (brand header + canonical nav) must be English. Asserting
-  //    both directions stops this correction from silently bleeding into the
-  //    module's own copy.
+  // 3. The canonical customer composer follows the same worldwide-first
+  //    language contract and replaces the shell's operational navigation with
+  //    exactly three compact customer destinations.
   const modulePage = await (await fetch(`${baseUrl}/platform/compose`)).text();
   assert.equal(GREEK_CHARACTERS.test(shellChrome(modulePage)), false, 'shell chrome must be English on module pages too');
-  assert.ok(GREEK_CHARACTERS.test(modulePage), 'legacy AutoPoster copy must stay Greek-first');
+  assert.equal(GREEK_CHARACTERS.test(modulePage), false, 'customer composer must be English-only');
+  assert.match(modulePage, /<html lang="en">/);
+  const customerNav = modulePage.slice(
+    modulePage.indexOf('<nav class="platform-nav customer-nav"'),
+    modulePage.indexOf('</nav>', modulePage.indexOf('<nav class="platform-nav customer-nav"'))
+  );
+  assert.equal((customerNav.match(/class="platform-nav-link/g) || []).length, 3);
+  for (const label of ['Queue', 'Accounts', 'Activity']) assert.ok(customerNav.includes(`>${label}</a>`));
 });
 
 test('platform shell APIs are read-only projections of the same truth', async (t) => {

@@ -221,7 +221,7 @@ test('empty selection blocks submission and the review step names what is missin
   assert.match(html, /id="submit-btn" type="submit" class="btn btn-primary" disabled/);
   assert.match(html, /accountsOk = setStep\('accounts', destinations\.length > 0/);
   // …and the Review step says which step is unsatisfied rather than failing mutely.
-  assert.match(html, /'Επιλέξτε λογαριασμό'/);
+  assert.match(html, /'Choose an account'/);
   // Belt and braces: a keyboard submit with an empty selection cannot post,
   // whichever media source is in use.
   assert.match(html, /if \(\(selectedFiles\.length === 0 && !usingUrlSource\(\)\) \|\| destinations\.length === 0\) return;/);
@@ -230,7 +230,7 @@ test('empty selection blocks submission and the review step names what is missin
 test('the form only appears when at least one account is actually selectable', () => {
   const youtubeOnly = renderIntake({ destinationGroups: groupAll([CONNECTED[2]]) });
   assert.ok(!youtubeOnly.includes('id="compose-form"'), 'no composer form without a selectable destination');
-  assert.match(youtubeOnly, /No connected, publishing-ready account/);
+  assert.match(youtubeOnly, /No account is ready/);
 
   assert.ok(renderIntake().includes('id="compose-form"'), 'the form appears when TikTok is selectable');
 });
