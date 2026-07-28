@@ -99,6 +99,10 @@ Optional providers and integrations:
 
 - Auto Caption: one or more of `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `QWEN_API_KEY`.
 - Auto Music: local `music-library` plus FFmpeg/FFprobe, with optional `AUTO_MUSIC_TOKEN_SECRET`.
+- Canonical Platform execution: keep `PLATFORM_CANONICAL_EXECUTION_ENABLED=false`
+  unless the Operator submit/control tokens, dedicated media-reference secret,
+  Runtime control token, and persistent `uploads/canonical-staged` volume are
+  all configured. The enabled path never falls back to the legacy direct write.
 - Instagram: keep `ENABLE_INSTAGRAM=false`, `INSTAGRAM_TEST_MODE=true`, and `INSTAGRAM_PUBLISH_ENABLED=false` unless the Meta app is fully configured and public publishing is intentionally enabled.
 
 `PUBLIC_BASE_URL` is only a fallback. For testing, paste a per-post `publicMediaUrl` such as `https://chanterr.com/media/tiktok-posts/test-image.png` into the queue item.

@@ -67,6 +67,26 @@ module.exports = {
     timeoutMs: Math.max(250, Number(process.env.OPERATOR_WORK_TIMEOUT_MS || 2500))
   },
 
+  // Canonical customer execution path. The legacy composer path remains the
+  // default until this explicit gate is enabled. Writes use two different
+  // Operator capabilities: submission may persist a command/graph, while
+  // execution requires the stronger control token. Staged-media references
+  // are signed with their own secret and never fall back to an admin/session
+  // credential.
+  canonicalExecution: {
+    enabled: envFlag('PLATFORM_CANONICAL_EXECUTION_ENABLED', false),
+    operatorBaseUrl: (process.env.OPERATOR_BASE_URL || '').trim(),
+    submitToken: process.env.OPERATOR_MISSION_SUBMIT_TOKEN || '',
+    controlToken: process.env.OPERATOR_CONTROL_TOKEN || '',
+    mediaReferenceSecret: process.env.PLATFORM_CANONICAL_MEDIA_REFERENCE_SECRET || '',
+    // Upload commands may only be activated when this path is mounted on a
+    // persistent single-instance/shared volume. A process-local or ephemeral
+    // deploy cannot honestly retain accepted media across restart.
+    persistentStagingAcknowledged: envFlag('PLATFORM_CANONICAL_STAGING_PERSISTENT', false),
+    timeoutMs: Math.max(500, Number(process.env.OPERATOR_COMMAND_TIMEOUT_MS || 10_000)),
+    stagedMediaDir: path.join(rootDir, 'uploads', 'canonical-staged')
+  },
+
   scheduler: {
     // How long a post is allowed to sit in "processing" before the
     // watchdog assumes the worker crashed and reclaims it.

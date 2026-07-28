@@ -17,6 +17,7 @@ const fsPromises = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const { createHash, randomUUID } = require('crypto');
+const { DateTime } = require('luxon');
 const defaultConfig = require('./config');
 const defaultStorage = require('./storage');
 const defaultAutoCaption = require('./autoCaption');
@@ -404,6 +405,172 @@ function createBatchService(dependencies = {}) {
   }
 
   // ── Intake ───────────────────────────────────────────────────────────────
+
+  // Canonical-command preflight. This deliberately owns no persistence: it
+  // closes the P0 shape to one video, one connected destination and one
+  // non-recurring schedule, then delegates every domain decision to the same
+  // account, media, schedule-planner and commercial authorities createBatch /
+  // schedulePost already use.
+  async function validateCanonicalSubmission(context, input = {}) {
+    const files = Array.isArray(input.files) ? input.files.filter(Boolean) : [];
+    const mediaUrl = String(input.mediaUrl || input.publicMediaUrl || '').trim();
+    if ((files.length === 0 && !mediaUrl) || (files.length > 0 && mediaUrl)) {
+      throw new BatchServiceError(
+        files.length > 0
+          ? 'Choose one media source: an uploaded video or a public media URL, not both.'
+          : 'Upload one video or provide one public media URL.',
+        { code: files.length > 0 ? 'ambiguous_media_source' : 'media_required' }
+      );
+    }
+    if (files.length > 1) {
+      throw new BatchServiceError('Canonical execution currently accepts exactly one video.', {
+        status: 409,
+        code: 'canonical_scope_unsupported'
+      });
+    }
+
+    const destinations = normalizeDestinations(input.destinations);
+    if (destinations.length !== 1) {
+      throw new BatchServiceError('Canonical execution currently accepts exactly one destination.', {
+        status: 409,
+        code: 'canonical_scope_unsupported'
+      });
+    }
+    const destination = destinations[0];
+    const scheduleMode = String(input.scheduleMode || 'interval').trim();
+    if (scheduleMode === RECURRING_DAILY_MODE) {
+      throw new BatchServiceError('Recurring schedules are not in the canonical P0 execution slice.', {
+        status: 409,
+        code: 'canonical_scope_unsupported'
+      });
+    }
+
+    const youtubeTitle = String((input.youtube && input.youtube.title) || '').trim();
+    if (destination.provider === providers.PROVIDER_YOUTUBE && !youtubeTitle) {
+      throw new BatchServiceError(
+        'YouTube requires a human-entered title per video.',
+        { status: 409, code: 'provider_not_batchable' }
+      );
+    }
+
+    const media = applicationService.validateMedia(context, { files, mediaUrl });
+    if (!media.valid) {
+      throw new BatchServiceError(media.reason, { code: media.code || 'media_invalid' });
+    }
+
+    const staggerMinutes = scheduleMode === 'interval'
+      ? normalizeStagger(input.staggerMinutes)
+      : null;
+    if (scheduleMode === 'interval' && staggerMinutes === null) {
+      throw new BatchServiceError(
+        `The stagger interval must be between ${settings.staggerMinMinutes} and ${settings.staggerMaxMinutes} minutes.`
+      );
+    }
+    const plan = computeBatchSchedulePlan({
+      mode: scheduleMode,
+      sourceCount: 1,
+      timezoneName: input.timezoneName,
+      timezoneOffsetMinutes: input.timezoneOffsetMinutes,
+      startDate: input.startDate,
+      startTime: input.startTime,
+      staggerMinutes,
+      firstDay: input.firstDay,
+      lastDay: input.lastDay,
+      postsPerDay: input.postsPerDay,
+      dailyStartTime: input.dailyStartTime,
+      dailyEndTime: input.dailyEndTime,
+      intraDayIntervalMinutes: input.intraDayIntervalMinutes,
+      dailySlots: input.dailySlots
+    });
+    if (!plan.ok || !plan.slots || plan.slots.length !== 1) {
+      throw new BatchServiceError(plan.reason || 'Canonical schedule did not resolve exactly one release.', {
+        code: 'schedule_invalid'
+      });
+    }
+    const scheduledAt = String(plan.slots[0].scheduledAt || '');
+    if (!Number.isFinite(Date.parse(scheduledAt)) || Date.parse(scheduledAt) <= now()) {
+      throw new BatchServiceError('The canonical release must be scheduled in the future.', {
+        code: 'schedule_invalid'
+      });
+    }
+    const timezoneOffsetMinutes = Number(input.timezoneOffsetMinutes);
+    if (
+      !Number.isInteger(timezoneOffsetMinutes)
+      || timezoneOffsetMinutes < -14 * 60
+      || timezoneOffsetMinutes > 14 * 60
+    ) {
+      throw new BatchServiceError('A valid timezone offset in minutes is required.', {
+        code: 'schedule_invalid'
+      });
+    }
+    const zonedSchedule = DateTime.fromISO(scheduledAt, { setZone: true }).setZone(plan.timezone);
+    if (!zonedSchedule.isValid || !Number.isInteger(zonedSchedule.offset)) {
+      throw new BatchServiceError('The canonical schedule timezone could not be resolved.', {
+        code: 'schedule_invalid'
+      });
+    }
+    const canonicalScheduledAt = zonedSchedule.toISO({
+      suppressMilliseconds: false,
+      includeOffset: true
+    });
+    const canonicalTimezoneOffsetMinutes = -zonedSchedule.offset;
+
+    // This read is intentionally fail closed. getComposerCapabilities() is a
+    // page-rendering convenience with a compatibility fallback and therefore
+    // is not an authorization boundary.
+    const planUsage = await applicationService.getPlanUsage(context);
+    const commercialContext = planUsage.commercialContext;
+    const scopedContext = { ...context, commercialContext };
+    const capability = composerPolicy.resolveComposerCapabilities(commercialContext, {
+      maxItems: settings.maxItems
+    });
+    if (!capability.resolved) {
+      throw new BatchServiceError('Commercial truth could not be verified for canonical execution.', {
+        status: 503,
+        code: 'commercial_truth_unverified'
+      });
+    }
+    const capabilityCheck = composerPolicy.checkComposerSubmission(capability, {
+      destinationCount: 1,
+      itemCount: 1
+    });
+    if (!capabilityCheck.allowed) {
+      throw new BatchServiceError(capabilityCheck.reason, {
+        status: 403,
+        code: capabilityCheck.code,
+        details: {
+          limit: capabilityCheck.limit,
+          current: capabilityCheck.current,
+          planId: capability.planId
+        }
+      });
+    }
+
+    const account = await applicationService.validateConnectedAccount(scopedContext, destination);
+    const authorization = await applicationService.authorizeSchedule(scopedContext, {
+      provider: destination.provider,
+      scheduledAt: canonicalScheduledAt,
+      quantity: 1,
+      // Execution will arrive through Runtime, so preflight must enforce that
+      // entitlement now rather than accepting a command Runtime must refuse.
+      authorizationSource: 'runtime'
+    });
+
+    return {
+      tenantId: authorization.workspaceId,
+      destination: {
+        provider: destination.provider,
+        accountId: account.account.accountId,
+        soundMode: destination.soundMode
+      },
+      schedule: {
+        scheduledAt: canonicalScheduledAt,
+        timezoneName: plan.timezone,
+        // Same sign convention as browser Date#getTimezoneOffset: UTC - local.
+        timezoneOffsetMinutes: canonicalTimezoneOffsetMinutes
+      }
+    };
+  }
 
   async function createBatch(context, input = {}) {
     const files = Array.isArray(input.files) ? input.files.filter(Boolean) : [];
@@ -1257,6 +1424,7 @@ function createBatchService(dependencies = {}) {
 
   return {
     createBatch,
+    validateCanonicalSubmission,
     getBatchView,
     listBatches,
     listDestinations,

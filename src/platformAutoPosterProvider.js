@@ -10,6 +10,7 @@
 // work on every surface is unchanged. This is a re-seating, not a rewrite.
 
 const batchService = require('./batchService');
+const applicationService = require('./autoposterApplicationService');
 const platformStatus = require('./platformStatus');
 
 const MODULE_ID = 'autoposter';
@@ -17,13 +18,28 @@ const MODULE_ID = 'autoposter';
 // listBatches is resolved per call rather than captured at require time so the
 // provider always uses the live service binding.
 function createAutoPosterWorkProvider(options = {}) {
+  const includeCanonicalRuntimeJobs = options.includeCanonicalRuntimeJobs === true;
   return {
     moduleId: MODULE_ID,
     listWork: async (context) => {
       const listBatches = options.listBatches || batchService.listBatches;
-      const result = await listBatches(context);
-      const batches = (result && result.batches) || [];
-      return batches.map(platformStatus.projectAutoPosterBatch);
+      // Runtime-created canonical work exists only behind the canonical
+      // execution flag. Keeping its queue read behind the same gate preserves
+      // the exact legacy read path while the feature is off.
+      const listQueue = includeCanonicalRuntimeJobs
+        ? (options.listQueue || applicationService.listQueue)
+        : null;
+      const [batchResult, queueResult] = await Promise.all([
+        listBatches(context),
+        listQueue ? listQueue(context, { limit: applicationService.MAX_QUEUE_LIMIT || 100 }) : null
+      ]);
+      const batches = (batchResult && batchResult.batches) || [];
+      const standaloneRuntimeJobs = ((queueResult && queueResult.items) || [])
+        .filter((post) => String(post.runtimeGraphId || '').trim() && !String(post.batchId || '').trim());
+      return [
+        ...batches.map(platformStatus.projectAutoPosterBatch),
+        ...standaloneRuntimeJobs.map(platformStatus.projectAutoPosterRuntimeJob)
+      ];
     }
   };
 }

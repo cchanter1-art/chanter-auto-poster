@@ -1235,14 +1235,17 @@ async function withServer(t, run) {
   const originalListDestinations = realBatchService.listDestinations;
   const originalCapabilities = realBatchService.getComposerCapabilities;
   const originalListBatches = realBatchService.listBatches;
+  const originalListSeries = realBatchService.listSeries;
   realBatchService.listDestinations = async () => ({ destinations: CONNECTED });
   realBatchService.getComposerCapabilities = async () => capabilitiesFor(planCatalog.PLAN_IDS.CREATOR);
   realBatchService.listBatches = async () => ({ batches: [] });
+  realBatchService.listSeries = async () => ({ series: [] });
   const server = await startServer();
   t.after(() => {
     realBatchService.listDestinations = originalListDestinations;
     realBatchService.getComposerCapabilities = originalCapabilities;
     realBatchService.listBatches = originalListBatches;
+    realBatchService.listSeries = originalListSeries;
     server.close();
   });
   const { port } = server.address();

@@ -5,6 +5,7 @@
 // that nothing on these routes can reach TikTok publishing code.
 
 process.env.RUNTIME_CONTROL_TOKEN = 'test-runtime-token-1234567890';
+process.env.PLATFORM_CANONICAL_MEDIA_REFERENCE_SECRET = 'runtime-staged-reference-test-secret-1234567890';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -17,6 +18,7 @@ const storage = require('../src/storage');
 const applicationService = require('../src/autoposterApplicationService');
 const { defaultWorkspaceId } = require('../src/workspaceService');
 const { createInitialYouTubeProviderOperation, sanitizeProviderOperation } = require('../src/youtubeProviderOperation');
+const { createCanonicalStagedMedia } = require('../src/canonicalStagedMedia');
 
 const TOKEN = 'test-runtime-token-1234567890';
 
@@ -56,8 +58,12 @@ function makePost(overrides = {}) {
     runtimeIdempotencyKey: '',
     runtimeScheduledBy: '',
     runtimeMissionId: '',
+    runtimeGraphId: '',
     runtimeAction: '',
     runtimePayloadHash: '',
+    campaignId: 'campaign-post-1',
+    approvalId: '',
+    evidenceBundleId: '',
     ...overrides
   };
 }
@@ -133,8 +139,13 @@ storage.addUploadedPosts = async (userId, files, defaults) => {
     runtimeScheduledBy: defaults.runtimeScheduledBy || '',
     workspaceId: defaults.workspaceId || '',
     runtimeMissionId: defaults.runtimeMissionId || '',
+    runtimeGraphId: defaults.runtimeGraphId || '',
     runtimeAction: defaults.runtimeAction || '',
     runtimePayloadHash: defaults.runtimePayloadHash || '',
+    campaignId: defaults.campaignId || `campaign-${state.addUploadedPostsCalls.length}`,
+    approvalId: defaults.approvalId || '',
+    evidenceBundleId: defaults.evidenceBundleId || '',
+    soundMode: defaults.soundMode || (defaults.accounts[0] && defaults.accounts[0].soundMode),
     provider: defaults.provider || 'tiktok'
   });
   state.posts.push(created);
@@ -367,8 +378,10 @@ test('runtime control routes: auth, scoping, media policy, idempotent scheduling
       scheduledAt,
       idempotencyKey: 'idem-100',
       missionId: 'mission-100',
+      graphId: 'graph-100',
       action: 'autoposter.post.schedule',
       missionPayloadHash: 'a'.repeat(64),
+      soundMode: 'tiktok_recommended',
       requestedBy: 'mcp-client'
     }
   });
@@ -380,11 +393,17 @@ test('runtime control routes: auth, scoping, media policy, idempotent scheduling
   assert.equal(scheduleBody.post.provider, 'tiktok', 'runtime-created items carry canonical provider identity');
   assert.equal(scheduleBody.post.approved, false, 'runtime scheduling never grants approval');
   assert.equal(scheduleBody.post.scheduledAt, new Date(scheduledAt).toISOString());
+  assert.match(scheduleBody.post.campaignId, /^campaign-/);
+  assert.equal(scheduleBody.post.approvalId, 'autoposter-approval:mission-100');
+  assert.equal(scheduleBody.post.evidenceBundleId, 'autoposter-evidence:graph-100');
   assert.equal(state.addUploadedPostsCalls.length, 1, 'exactly one queue item created');
   assert.equal(state.updatePostCalls.length, 0, 'explicit schedule is persisted in the initial create-only write');
   assert.equal(state.addUploadedPostsCalls[0].defaults.runtimeIdempotencyKey, 'idem-100');
   assert.equal(state.addUploadedPostsCalls[0].defaults.scheduledAt, new Date(scheduledAt).toISOString());
   assert.equal(state.addUploadedPostsCalls[0].defaults.createOnly, true);
+  assert.equal(state.addUploadedPostsCalls[0].defaults.soundMode, 'tiktok_recommended');
+  assert.equal(state.addUploadedPostsCalls[0].defaults.approvalId, 'autoposter-approval:mission-100');
+  assert.equal(state.addUploadedPostsCalls[0].defaults.evidenceBundleId, 'autoposter-evidence:graph-100');
   assert.match(state.addUploadedPostsCalls[0].defaults.scheduleHistory.detail, /awaits human approval/);
   assert.equal(
     state.legacyAccountReads.length,
@@ -406,6 +425,7 @@ test('runtime control routes: auth, scoping, media policy, idempotent scheduling
       scheduledAt,
       idempotencyKey: 'idem-100',
       missionId: 'mission-100',
+      graphId: 'graph-100',
       action: 'autoposter.post.schedule',
       missionPayloadHash: 'a'.repeat(64)
     }
@@ -415,6 +435,8 @@ test('runtime control routes: auth, scoping, media policy, idempotent scheduling
   assert.equal(duplicateBody.ok, true);
   assert.equal(duplicateBody.duplicate, true);
   assert.equal(duplicateBody.post.id, scheduleBody.post.id);
+  assert.equal(duplicateBody.post.approvalId, scheduleBody.post.approvalId);
+  assert.equal(duplicateBody.post.evidenceBundleId, scheduleBody.post.evidenceBundleId);
   assert.equal(state.addUploadedPostsCalls.length, 1, 'no second queue item for a duplicate key');
 
   const reconciliationBody = {
@@ -436,6 +458,9 @@ test('runtime control routes: auth, scoping, media policy, idempotent scheduling
   assert.equal(reconciledBody.outcome, 'unique');
   assert.equal(reconciledBody.safeToReuse, true);
   assert.equal(reconciledBody.post.id, scheduleBody.post.id);
+  assert.equal(reconciledBody.post.campaignId, scheduleBody.post.campaignId);
+  assert.equal(reconciledBody.post.approvalId, scheduleBody.post.approvalId);
+  assert.equal(reconciledBody.post.evidenceBundleId, scheduleBody.post.evidenceBundleId);
   assert.equal(reconciledBody.approvalState, 'required');
   assert.equal(reconciledBody.publishingState, 'blocked_until_human_approval');
   assert.equal(state.addUploadedPostsCalls.length, 1, 'read-only reconciliation creates nothing');
@@ -492,6 +517,119 @@ test('runtime control routes: auth, scoping, media policy, idempotent scheduling
   assert.equal(state.addUploadedPostsCalls.length - createsBefore, 0);
   assert.equal(state.updatePostCalls.length, 0, 'no refused request applied a schedule');
 
+  // Signed staged upload: the first call uses a disposable copy; exact replay
+  // succeeds from the durable product record after staging has been released.
+  const staging = createCanonicalStagedMedia({
+    rootDir: config.canonicalExecution.stagedMediaDir,
+    secret: config.canonicalExecution.mediaReferenceSecret
+  });
+  const stagedCommandId = `platform-autoposter-${'c'.repeat(40)}`;
+  const stagedSourceDir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'runtime-stage-route-'));
+  t.after(() => fs.rmSync(stagedSourceDir, { recursive: true, force: true }));
+  const stagedSourcePath = path.join(stagedSourceDir, 'canonical.mp4');
+  fs.writeFileSync(stagedSourcePath, 'canonical-staged-video');
+  const staged = await staging.stage(stagedCommandId, {
+    path: stagedSourcePath,
+    filename: 'canonical.mp4',
+    originalname: 'canonical.mp4',
+    mimetype: 'video/mp4',
+    size: fs.statSync(stagedSourcePath).size
+  });
+  const stagedScheduleBody = {
+    workspaceId: defaultWorkspaceId('owner'),
+    accountId: 'account-a',
+    provider: 'tiktok',
+    mediaUrl: staged.reference,
+    caption: 'Canonical staged pilot',
+    soundMode: 'tiktok_recommended',
+    scheduledAt: futureIso(150),
+    idempotencyKey: 'canonical-staged-idem-1',
+    missionId: 'canonical-staged-mission-1',
+    graphId: 'canonical-staged-graph-1',
+    action: 'autoposter.post.schedule',
+    missionPayloadHash: 'd'.repeat(64)
+  };
+  const createsBeforeStaged = state.addUploadedPostsCalls.length;
+  const stagedFirst = await call('POST', '/api/runtime/schedule', { body: stagedScheduleBody });
+  assert.equal(stagedFirst.status, 201);
+  const stagedFirstBody = await stagedFirst.json();
+  assert.equal(stagedFirstBody.post.approvalId, 'autoposter-approval:canonical-staged-mission-1');
+  assert.equal(stagedFirstBody.post.evidenceBundleId, 'autoposter-evidence:canonical-staged-graph-1');
+  assert.equal(state.addUploadedPostsCalls.length, createsBeforeStaged + 1);
+  assert.equal(
+    fs.existsSync(path.join(config.canonicalExecution.stagedMediaDir, stagedCommandId)),
+    false,
+    'durable product custody releases terminal staging'
+  );
+
+  const stagedReplay = await call('POST', '/api/runtime/schedule', { body: stagedScheduleBody });
+  assert.equal(stagedReplay.status, 200);
+  const stagedReplayBody = await stagedReplay.json();
+  assert.equal(stagedReplayBody.duplicate, true);
+  assert.equal(stagedReplayBody.post.id, stagedFirstBody.post.id);
+  assert.equal(state.addUploadedPostsCalls.length, createsBeforeStaged + 1, 'staged replay creates no job');
+
+  const stagedPost = state.posts.find((post) => post.id === stagedFirstBody.post.id);
+  const exactLinkage = {
+    campaignId: stagedPost.campaignId,
+    approvalId: stagedPost.approvalId,
+    evidenceBundleId: stagedPost.evidenceBundleId
+  };
+  const invalidLinkage = {
+    campaignId: ` ${exactLinkage.campaignId}`,
+    approvalId: `${exactLinkage.approvalId}\n`,
+    evidenceBundleId: 'e'.repeat(257)
+  };
+  const exactReconcileBody = {
+    workspaceId: stagedScheduleBody.workspaceId,
+    accountId: stagedScheduleBody.accountId,
+    provider: stagedScheduleBody.provider,
+    scheduledAt: stagedScheduleBody.scheduledAt,
+    idempotencyKey: stagedScheduleBody.idempotencyKey,
+    missionId: stagedScheduleBody.missionId,
+    action: stagedScheduleBody.action,
+    missionPayloadHash: stagedScheduleBody.missionPayloadHash
+  };
+  for (const [field, invalidValue] of Object.entries(invalidLinkage)) {
+    stagedPost[field] = invalidValue;
+    const corruptReconcile = await call('POST', '/api/runtime/schedule/reconcile', {
+      body: exactReconcileBody
+    });
+    assert.equal(corruptReconcile.status, 500, `${field} reconcile`);
+    assert.equal((await corruptReconcile.json()).code, 'runtime_linkage_invalid', field);
+
+    const corruptReplay = await call('POST', '/api/runtime/schedule', { body: stagedScheduleBody });
+    assert.equal(corruptReplay.status, 500, `${field} schedule replay`);
+    assert.equal((await corruptReplay.json()).code, 'runtime_linkage_invalid', field);
+    stagedPost[field] = exactLinkage[field];
+  }
+
+  const failedStageCommandId = `platform-autoposter-${'f'.repeat(40)}`;
+  const failedStage = await staging.stage(failedStageCommandId, {
+    path: stagedSourcePath,
+    filename: 'canonical.mp4',
+    originalname: 'canonical.mp4',
+    mimetype: 'video/mp4',
+    size: fs.statSync(stagedSourcePath).size
+  });
+  const failedCreate = await call('POST', '/api/runtime/schedule', {
+    body: {
+      ...stagedScheduleBody,
+      accountId: 'account-nope',
+      mediaUrl: failedStage.reference,
+      idempotencyKey: 'canonical-staged-failed-idem',
+      missionId: 'canonical-staged-failed-mission',
+      graphId: 'canonical-staged-failed-graph'
+    }
+  });
+  assert.equal(failedCreate.status, 404);
+  assert.equal(
+    fs.existsSync(path.join(config.canonicalExecution.stagedMediaDir, failedStageCommandId)),
+    true,
+    'failed product creation retains stable bytes for recovery'
+  );
+  await staging.release(failedStage.reference);
+
   // ── No publishing: TikTok module was never touched ───────────────────────
   assert.deepEqual(state.tiktokTouched, [], 'runtime control surface must never call TikTok code');
 });
@@ -507,6 +645,7 @@ test('runtime control routes: no responses ever contain the service token', asyn
 });
 
 test('runtime routes propagate verified workspace context and preserve structured commercial denial', async (t) => {
+  const createsBeforeCommercialDenial = state.addUploadedPostsCalls.length;
   const originals = {
     listQueue: applicationService.listQueue,
     getPostStatus: applicationService.getPostStatus,
@@ -609,7 +748,11 @@ test('runtime routes propagate verified workspace context and preserve structure
   assert.equal('planId' in scheduleCall.input, false);
   assert.equal('entitlementOverrides' in scheduleCall.input, false);
   assert.equal('scheduledPostsPerCycle' in scheduleCall.input, false);
-  assert.equal(state.addUploadedPostsCalls.length, 1, 'structured denial creates no additional queue item');
+  assert.equal(
+    state.addUploadedPostsCalls.length,
+    createsBeforeCommercialDenial,
+    'structured denial creates no additional queue item'
+  );
 });
 
 test('runtime post status exposes the bounded Phase 2E-B lifecycle contract truthfully', async (t) => {
