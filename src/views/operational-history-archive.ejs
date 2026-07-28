@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Operational Archive · <%= appName %></title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0d10;
+        --panel: #12151a;
+        --panel-2: #181c22;
+        --line: rgba(255,255,255,.1);
+        --text: #f4f1ea;
+        --muted: #9ca3ad;
+        --accent: #c8a96b;
+        --ok: #74c69d;
+        --warn: #e5b567;
+        --bad: #ef7d7d;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 80% 0%, rgba(200,169,107,.09), transparent 34rem),
+          var(--bg);
+        color: var(--text);
+        font: 14px/1.55 Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+      main { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 64px; }
+      header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 24px; }
+      .eyebrow { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
+      h1 { margin: 6px 0 7px; font-size: clamp(28px, 5vw, 42px); letter-spacing: -.035em; }
+      p { margin: 0; color: var(--muted); }
+      a { color: var(--text); }
+      .back { padding-top: 8px; white-space: nowrap; }
+      .panel { border: 1px solid var(--line); border-radius: 18px; background: rgba(18,21,26,.94); overflow: hidden; }
+      .panel-head, .panel-body { padding: 22px; }
+      .panel-head { border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 20px; }
+      .status { color: var(--muted); font-size: 12px; }
+      .status[data-tone="ok"] { color: var(--ok); }
+      .status[data-tone="warn"] { color: var(--warn); }
+      .status[data-tone="bad"] { color: var(--bad); }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+      button {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 15px;
+        background: var(--panel-2);
+        color: var(--text);
+        font: inherit;
+        font-weight: 750;
+        cursor: pointer;
+      }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #14110b; }
+      button:disabled { cursor: wait; opacity: .48; }
+      .warning { margin-top: 16px; padding: 12px 14px; border: 1px solid rgba(229,181,103,.28); border-radius: 10px; color: var(--warn); background: rgba(229,181,103,.07); }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0; }
+      .metric { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+      .metric span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+      .metric strong { display: block; margin-top: 5px; font-size: 20px; }
+      .field { margin-top: 13px; }
+      .field label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .08em; }
+      code { display: block; overflow-wrap: anywhere; color: #d9d2c5; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      details { margin-top: 15px; border-top: 1px solid var(--line); padding-top: 14px; }
+      summary { cursor: pointer; font-weight: 750; }
+      ul { margin: 10px 0 0; padding-left: 20px; }
+      li { margin: 5px 0; overflow-wrap: anywhere; }
+      .result { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+      .result h2 { margin: 0 0 12px; font-size: 20px; }
+      .hidden { display: none !important; }
+      .error { margin-top: 16px; padding: 13px 14px; border: 1px solid rgba(239,125,125,.3); border-radius: 10px; color: var(--bad); background: rgba(239,125,125,.07); }
+      @media (max-width: 640px) {
+        header, .panel-head { flex-direction: column; }
+        .grid { grid-template-columns: 1fr; }
+        .back { padding-top: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">Founder control</div>
+          <h1>Operational archive</h1>
+          <p>Preview and archive completed AutoPoster records without deleting history.</p>
+        </div>
+        <a class="back" href="/private/autoposter/legacy">Back to AutoPoster</a>
+      </header>
+
+      <section class="panel" aria-labelledby="archive-title">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Emulator only</div>
+            <h2 id="archive-title">Completed operational records</h2>
+          </div>
+          <div class="status" data-status>Idle</div>
+        </div>
+        <div class="panel-body">
+          <p>Founder scope: <strong><%= ownerId %></strong></p>
+          <div class="warning">Additive archive only. Original records and provider evidence remain recoverable. Physical deletion is disabled.</div>
+
+          <div class="actions">
+            <button class="primary" type="button" data-preview>Preview archive candidates</button>
+          </div>
+
+          <section class="hidden" data-preview-result aria-live="polite">
+            <div class="grid">
+              <div class="metric"><span>Candidates</span><strong data-candidate-count>0</strong></div>
+              <div class="metric"><span>Deferred</span><strong data-deferred-count>0</strong></div>
+              <div class="metric"><span>Ready</span><strong data-ready>No</strong></div>
+            </div>
+            <div class="field">
+              <label>Classifications</label>
+              <code data-classifications>—</code>
+            </div>
+            <div class="field">
+              <label>Operation ID</label>
+              <code data-operation-id>—</code>
+            </div>
+            <div class="field">
+              <label>Candidate-set hash</label>
+              <code data-candidate-hash>—</code>
+            </div>
+            <details>
+              <summary>Exact candidate IDs</summary>
+              <ul data-candidate-ids></ul>
+            </details>
+            <details class="hidden" data-blocker-details>
+              <summary>Blocking reasons</summary>
+              <ul data-blockers></ul>
+            </details>
+            <div class="actions">
+              <button class="primary" type="button" data-execute disabled>Approve &amp; archive</button>
+            </div>
+          </section>
+
+          <section class="result hidden" data-result aria-live="polite">
+            <h2 data-result-title>Operation result</h2>
+            <div class="grid">
+              <div class="metric"><span>Archived</span><strong data-archived-count>0</strong></div>
+              <div class="metric"><span>Skipped / failed</span><strong data-skipped-count>0</strong></div>
+              <div class="metric"><span>Physical deletes</span><strong data-delete-count>0</strong></div>
+            </div>
+            <div class="field">
+              <label>Persisted evidence ID</label>
+              <code data-evidence-id>—</code>
+            </div>
+            <div class="field">
+              <label>Replay</label>
+              <code data-replay>No duplicate mutation</code>
+            </div>
+            <details>
+              <summary>Archived IDs</summary>
+              <ul data-archived-ids></ul>
+            </details>
+            <details class="hidden" data-failure-details>
+              <summary>Skipped and failed records</summary>
+              <ul data-failures></ul>
+            </details>
+          </section>
+
+          <div class="error hidden" data-error role="alert"></div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const controlPath = <%- JSON.stringify(controlPath) %>;
+        const previewButton = document.querySelector('[data-preview]');
+        const executeButton = document.querySelector('[data-execute]');
+        const status = document.querySelector('[data-status]');
+        const errorBox = document.querySelector('[data-error]');
+        let preview = null;
+
+        const setStatus = (label, tone = '') => {
+          status.textContent = label;
+          status.dataset.tone = tone;
+        };
+        const setBusy = (busy) => {
+          previewButton.disabled = busy;
+          executeButton.disabled = busy || !preview || !preview.executionReady;
+        };
+        const list = (root, values) => {
+          root.replaceChildren(...values.map((value) => {
+            const item = document.createElement('li');
+            item.textContent = value;
+            return item;
+          }));
+        };
+        const showError = (payload) => {
+          errorBox.textContent = `${payload.code || 'archive_control_failed'} · ${payload.reason || 'Request failed.'}`;
+          errorBox.classList.remove('hidden');
+          setStatus('Rejected / blocked', 'bad');
+        };
+        const request = async (url, options = {}) => {
+          const response = await fetch(url, {
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            ...options
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw payload;
+          return payload;
+        };
+
+        previewButton.addEventListener('click', async () => {
+          errorBox.classList.add('hidden');
+          document.querySelector('[data-result]').classList.add('hidden');
+          setBusy(true);
+          setStatus('Loading preview', 'warn');
+          try {
+            const payload = await request(`${controlPath}/preview`, {
+              method: 'POST',
+              body: JSON.stringify({ maxCandidates: 100 })
+            });
+            preview = payload.preview;
+            document.querySelector('[data-preview-result]').classList.remove('hidden');
+            document.querySelector('[data-candidate-count]').textContent = String(preview.candidateCount);
+            document.querySelector('[data-deferred-count]').textContent = String(preview.remainingCandidateIds.length);
+            document.querySelector('[data-ready]').textContent = preview.executionReady ? 'Yes' : 'No';
+            document.querySelector('[data-operation-id]').textContent = preview.operationId;
+            document.querySelector('[data-candidate-hash]').textContent = preview.candidateSetHash;
+            document.querySelector('[data-classifications]').textContent = Object.entries(preview.classificationSummary)
+              .map(([name, count]) => `${name}: ${count}`)
+              .join(' · ') || 'none';
+            list(document.querySelector('[data-candidate-ids]'), preview.candidateIds);
+            const blockerDetails = document.querySelector('[data-blocker-details]');
+            blockerDetails.classList.toggle('hidden', preview.blockers.length === 0);
+            list(document.querySelector('[data-blockers]'), preview.blockers);
+            setStatus(preview.executionReady ? 'Preview ready' : 'Preview blocked', preview.executionReady ? 'ok' : 'bad');
+          } catch (error) {
+            preview = null;
+            showError(error);
+          } finally {
+            setBusy(false);
+          }
+        });
+
+        executeButton.addEventListener('click', async () => {
+          if (!preview || !preview.executionReady) return;
+          const confirmed = window.confirm(
+            `Archive ${preview.candidateCount} completed records? This adds recoverable archive metadata and performs no physical deletion.`
+          );
+          if (!confirmed) return;
+          errorBox.classList.add('hidden');
+          setBusy(true);
+          setStatus('Executing bounded archive', 'warn');
+          try {
+            const payload = await request(`${controlPath}/execute`, {
+              method: 'POST',
+              body: JSON.stringify({
+                operationId: preview.operationId,
+                candidateSetHash: preview.candidateSetHash,
+                confirmation: 'APPROVE_ARCHIVE'
+              })
+            });
+            const evidence = payload.evidence;
+            const rejected = [...evidence.skipped, ...evidence.failures];
+            document.querySelector('[data-result]').classList.remove('hidden');
+            document.querySelector('[data-result-title]').textContent =
+              evidence.state === 'partial' ? 'Partial archive result' : 'Archive completed';
+            document.querySelector('[data-archived-count]').textContent = String(evidence.archivedIds.length);
+            document.querySelector('[data-skipped-count]').textContent = String(rejected.length);
+            document.querySelector('[data-delete-count]').textContent = String(evidence.physicalDeletes);
+            document.querySelector('[data-evidence-id]').textContent = evidence.evidenceId;
+            document.querySelector('[data-replay]').textContent = evidence.replayed
+              ? `Replay confirmed · ${evidence.replayMutationCount} duplicate mutations`
+              : 'Initial execution · persisted';
+            list(document.querySelector('[data-archived-ids]'), evidence.archivedIds);
+            const failureDetails = document.querySelector('[data-failure-details]');
+            failureDetails.classList.toggle('hidden', rejected.length === 0);
+            list(document.querySelector('[data-failures]'), rejected.map((item) =>
+              `${item.recordId} · ${item.reason}`));
+            setStatus(
+              evidence.state === 'partial' ? 'Partial' : (evidence.replayed ? 'Replay' : 'Completed'),
+              evidence.state === 'partial' ? 'warn' : 'ok'
+            );
+          } catch (error) {
+            showError(error);
+          } finally {
+            setBusy(false);
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

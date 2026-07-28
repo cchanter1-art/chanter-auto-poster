@@ -6,6 +6,9 @@ const routes = require('./routes');
 const clientRoutes = require('./clientRoutes');
 const platformRoutes = require('./platformRoutes');
 const runtimeControlRoutes = require('./runtimeControlRoutes');
+const {
+  createOperationalHistoryArchiveRouter
+} = require('./operationalHistoryArchiveRoutes');
 const storage = require('./storage');
 const { attachUser, csrfOriginCheck, requireAdminPage, validateAdminConfig } = require('./auth');
 const { attachClientSession } = require('./clientAuth');
@@ -37,6 +40,10 @@ app.use('/uploads', requireAdminPage, express.static(config.uploadsDir));
 // Client portal routes are mounted before the admin router so their more
 // specific /client/* paths never fall through to admin-only middleware.
 app.use('/', clientRoutes);
+// Founder-only, emulator-only operational archive controls. This router
+// derives owner scope from the signed admin session and never accepts a
+// production Firestore project.
+app.use('/', createOperationalHistoryArchiveRouter());
 // CHANTER Platform shell + AutoPoster batch module (Greek-first customer
 // surface). Same admin session/CSRF protections as the classic console.
 app.use('/', platformRoutes);

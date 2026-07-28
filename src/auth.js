@@ -146,6 +146,7 @@ function safeReturnTo(value) {
       || parsed.pathname.startsWith('/platform/')
       || parsed.pathname === '/private/autoposter/legacy'
       || parsed.pathname === '/private/autoposter/dashboard'
+      || parsed.pathname === '/internal/operational-history/archive'
       || parsed.pathname === '/connect/tiktok';
     return allowedPath ? `${parsed.pathname}${parsed.search}` : '/platform';
   } catch (error) {
