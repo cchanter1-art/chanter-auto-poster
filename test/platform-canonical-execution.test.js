@@ -345,6 +345,7 @@ test('canonical preflight uses exact account, media, schedule, capability, and R
 });
 
 test('completed Operator replay removes re-staged bytes, while uncertain execution retains them', async () => {
+  const now = () => Date.parse('2026-07-26T00:00:00.000Z');
   const settings = {
     enabled: true,
     operatorBaseUrl: 'http://127.0.0.1:4010',
@@ -385,6 +386,7 @@ test('completed Operator replay removes re-staged bytes, while uncertain executi
   };
   const completed = createPlatformCanonicalExecution({
     config: settings,
+    now,
     validateCanonicalSubmission: async () => validated,
     stagedMedia,
     operatorClient: {
@@ -420,6 +422,7 @@ test('completed Operator replay removes re-staged bytes, while uncertain executi
   let releaseCalls = 0;
   const uncertain = createPlatformCanonicalExecution({
     config: settings,
+    now,
     validateCanonicalSubmission: async () => validated,
     stagedMedia: {
       stage: stagedMedia.stage,
