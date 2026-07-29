@@ -23,6 +23,7 @@
 
 const platformModules = require('./platformModules');
 const platformStatus = require('./platformStatus');
+const missionValue = require('./missionValue');
 
 // A provider failure is reported, never swallowed and never rendered as "no
 // work". These are the two honest outcomes:
@@ -109,8 +110,17 @@ function createWorkRegistry() {
   }
 
   function adopt(item, moduleId, ownership) {
+    const validatedValueContract = missionValue.validateMissionValueContract(
+      Object.prototype.hasOwnProperty.call(item, 'missionValueContract')
+        ? item.missionValueContract
+        : null
+    );
     return {
       ...item,
+      // The contract stays on its owning work item. Validation happens at this
+      // projection boundary so malformed declarations degrade the provider
+      // instead of becoming partially trusted UI state.
+      missionValueContract: validatedValueContract,
       // A provider does not get to claim another module's identity.
       moduleId,
       moduleName: ownership.moduleName,

@@ -305,6 +305,77 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   assert.ok(pages['/platform/health'].includes('Required'));
 });
 
+test('Overview, Work, and Evidence render the same truthful mission value evaluation', async (t) => {
+  const originalListBatches = batchService.listBatches;
+  batchService.listBatches = async () => ({
+    batches: [{
+      ...BATCH_RECORDS[1],
+      missionValueContract: {
+        schema: 'chanter.mission-value-contract.v1',
+        objective: {
+          statement: 'Prepare three drafts for verified founder review.',
+          acceptanceCriteria: ['All three drafts carry verified review evidence.']
+        },
+        budgets: {
+          cost: { currency: 'USD', maximum: 5 },
+          humanAttentionMinutes: 10,
+          riskTolerance: 'low'
+        },
+        expected: {
+          evidenceRequired: 1,
+          reversibility: 'reversible'
+        }
+      },
+      missionValueEvidence: [{
+        evidenceId: 'shell-value-evidence',
+        acceptanceCriterion: 'All three drafts carry verified review evidence.',
+        verificationState: 'verified',
+        source: 'existing batch review record',
+        observedAt: '2026-07-24T10:05:00.000Z'
+      }]
+    }]
+  });
+  const server = await startServer();
+  t.after(() => {
+    batchService.listBatches = originalListBatches;
+    server.close();
+  });
+
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const overview = await (await fetch(`${baseUrl}/platform`)).text();
+  const work = await (await fetch(`${baseUrl}/platform/work`)).text();
+  const evidence = await (await fetch(`${baseUrl}/platform/evidence`)).text();
+
+  for (const dimension of [
+    'objective',
+    'acceptance',
+    'time',
+    'timeliness',
+    'attention',
+    'cost',
+    'risk',
+    'evidence',
+    'verification',
+    'verified-value'
+  ]) {
+    assert.ok(overview.includes(`data-value-dimension="${dimension}"`));
+  }
+  assert.ok(overview.includes('No scalar score'));
+  assert.ok(overview.includes('data-provenance="declared"'));
+  assert.ok(overview.includes('Prepare three drafts for verified founder review.'));
+  assert.ok(overview.includes('Unavailable'));
+
+  assert.ok(work.includes('data-value-work="batch-waiting-0002"'));
+  assert.ok(work.includes('data-value-state="verified"'));
+  assert.ok(work.includes('Missing measurements'));
+  assert.ok(work.includes('View linked evidence'));
+
+  assert.ok(evidence.includes('data-value-state="verified"'));
+  assert.ok(evidence.includes('data-criterion-state="verified"'));
+  assert.ok(evidence.includes('All three drafts carry verified review evidence.'));
+  assert.ok(evidence.includes('<dt>Readiness changed</dt><dd>Yes - Verification pending to Verified</dd>'));
+});
+
 test('the platform shell and customer composer are English-only', async (t) => {
   const originalListBatches = batchService.listBatches;
   batchService.listBatches = async () => ({ batches: BATCH_RECORDS });

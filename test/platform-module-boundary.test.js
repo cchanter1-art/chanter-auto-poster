@@ -24,8 +24,19 @@ test('Platform overview is one read-only command center over existing truth', ()
     assert.match(home, new RegExp(`data-testid="${surface}"`));
   }
   assert.match(home, /commandCenter\.valueRibbon\.fields/);
-  const projection = read('src/platformCommandCenter.js');
-  for (const field of ['Objective', 'Time to verified outcome', 'Human attention', 'Risk', 'Evidence coverage', 'Verified value state']) {
+  const projection = `${read('src/platformCommandCenter.js')}\n${read('src/missionValue.js')}`;
+  for (const field of [
+    'Objective',
+    'Acceptance coverage',
+    'Time to verified outcome',
+    'Timeliness',
+    'Human attention',
+    'Cost',
+    'Risk',
+    'Evidence coverage',
+    'Verification state',
+    'Verified value state'
+  ]) {
     assert.match(projection, new RegExp(field));
   }
   for (const forbidden of ['<form', '<button', 'accept-all', 'createBatch', 'Coming soon']) {

@@ -1694,9 +1694,15 @@ a.command-action:hover {
   font-size: 12px;
   white-space: nowrap;
 }
+.value-focus {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
 .value-fields {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin: 17px -20px 0;
   border-top: 1px solid rgba(201, 169, 97, .18);
   border-bottom: 1px solid rgba(201, 169, 97, .18);
@@ -1709,7 +1715,8 @@ a.command-action:hover {
   padding: 14px 13px;
   color: var(--text);
 }
-.value-field:last-child { border-right: 0; }
+.value-field:nth-child(5n) { border-right: 0; }
+.value-field:nth-child(-n+5) { border-bottom: 1px solid rgba(201, 169, 97, .18); }
 .value-field:hover { background: rgba(201, 169, 97, .04); text-decoration: none; }
 .value-field span {
   color: var(--text-faint);
@@ -1718,7 +1725,37 @@ a.command-action:hover {
   text-transform: uppercase;
 }
 .value-field strong { overflow-wrap: anywhere; font-size: 12px; }
+.value-field small {
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
 .value-ribbon > p { margin: 13px 0 0; color: var(--text-faint); font-size: 11.5px; }
+.value-explanation {
+  margin-top: 12px;
+  border-top: 1px solid rgba(201, 169, 97, .18);
+  padding-top: 11px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+.value-explanation summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 700;
+}
+.value-explanation p { margin: 10px 0 0; line-height: 1.55; }
+.value-explanation dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.value-explanation dl div {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 9px;
+}
+.value-explanation dt { color: var(--text); font-weight: 700; }
+.value-explanation dd { margin: 4px 0 0; color: var(--text-faint); }
 .command-module-grid { margin-top: 14px; }
 .command-module-card { display: flex; min-height: 190px; flex-direction: column; }
 .command-module-card .module-desc { margin: 12px 0 0; }
@@ -1751,6 +1788,40 @@ a.command-action:hover {
   font-weight: 750;
 }
 .work-row-action-disabled { color: var(--text-faint); }
+.work-value-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: -8px 0 12px;
+  border: 1px solid var(--border-soft);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: rgba(255, 255, 255, .015);
+  padding: 10px 13px;
+}
+.work-value-summary dl {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.work-value-summary dt {
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.work-value-summary dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 11.5px;
+}
+.work-value-summary .chip { font-size: 9.5px; }
+.value-evidence-unavailable { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
 .decision-grid { display: grid; gap: 14px; }
 .decision-card {
   border: 1px solid var(--border-soft);
@@ -1806,7 +1877,7 @@ a.command-action:hover {
 #evidence-filter-empty[hidden] { display: none; }
 .evidence-ledger-row {
   display: grid;
-  grid-template-columns: minmax(190px, 1fr) minmax(420px, 2fr) auto;
+  grid-template-columns: minmax(190px, .7fr) minmax(420px, 1.7fr);
   align-items: center;
   gap: 18px;
   border: 1px solid var(--border-soft);
@@ -1818,11 +1889,36 @@ a.command-action:hover {
 .evidence-time { display: block; margin-top: 5px; color: var(--text-faint); font-size: 11px; }
 .evidence-facts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
   margin: 0;
 }
 .evidence-facts div { min-width: 0; padding: 0 10px; border-left: 1px solid var(--border-soft); }
+.evidence-criteria {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 14px;
+}
+.evidence-criteria p { margin: 7px 0 0; color: var(--text-faint); font-size: 11.5px; }
+.evidence-criteria ul {
+  display: grid;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.evidence-criteria li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+.evidence-criteria li strong { color: var(--text); font-size: 10.5px; white-space: nowrap; }
+.evidence-criteria li[data-criterion-state="verified"] strong { color: var(--success); }
+.evidence-criteria li[data-criterion-state="failed"] strong { color: var(--danger); }
+.evidence-ledger-row .command-action { grid-column: 1 / -1; justify-self: start; }
 .health-summary {
   display: flex;
   align-items: center;
@@ -1844,17 +1940,19 @@ a.command-action:hover {
 }
 
 @media (max-width: 980px) {
-  .truth-grid,
-  .value-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .truth-grid div:nth-child(3),
-  .value-field:nth-child(3) { border-right: 0; }
-  .truth-grid div:nth-child(-n+3),
-  .value-field:nth-child(-n+3) { border-bottom: 1px solid var(--border-soft); }
+  .truth-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .truth-grid div:nth-child(3) { border-right: 0; }
+  .truth-grid div:nth-child(-n+3) { border-bottom: 1px solid var(--border-soft); }
+  .value-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .value-field,
+  .value-field:nth-child(5n) { border-right: 1px solid rgba(201, 169, 97, .18); }
+  .value-field:nth-child(2n) { border-right: 0; }
+  .value-field:not(:nth-last-child(-n+2)) { border-bottom: 1px solid rgba(201, 169, 97, .18); }
+  .value-explanation dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .command-split { grid-template-columns: 1fr; }
   .evidence-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .command-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .evidence-ledger-row { grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr); }
-  .evidence-ledger-row .command-action { grid-column: 1 / -1; justify-self: start; }
 }
 
 @media (max-width: 720px) {
@@ -1882,13 +1980,10 @@ a.command-action:hover {
   .truth-grid,
   .value-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .truth-grid div,
-  .truth-grid div:nth-child(3),
-  .value-field,
-  .value-field:nth-child(3) { border-right: 1px solid var(--border-soft); }
+  .truth-grid div:nth-child(3) { border-right: 1px solid var(--border-soft); }
   .truth-grid div:nth-child(2n),
   .value-field:nth-child(2n) { border-right: 0; }
-  .truth-grid div:nth-child(-n+4),
-  .value-field:nth-child(-n+4) { border-bottom: 1px solid var(--border-soft); }
+  .truth-grid div:nth-child(-n+4) { border-bottom: 1px solid var(--border-soft); }
   .attention-item { grid-template-columns: 8px minmax(0, 1fr); }
   .attention-item .text-action { grid-column: 2; }
   .evidence-strip { grid-template-columns: 1fr; }
@@ -1899,6 +1994,8 @@ a.command-action:hover {
   .platform-command-center .batch-row .counts { grid-column: 1; }
   .platform-command-center .batch-row .chip { grid-row: 1; grid-column: 2; }
   .platform-command-center .batch-row .work-row-action { grid-row: 2; grid-column: 2; }
+  .work-value-summary { align-items: flex-start; flex-direction: column; }
+  .work-value-summary dl { width: 100%; grid-template-columns: 1fr 1fr; }
   .decision-card-head { align-items: flex-start; flex-direction: column; }
   .decision-fields { grid-template-columns: 1fr 1fr; }
   .decision-fields div,
@@ -1912,6 +2009,7 @@ a.command-action:hover {
   .evidence-facts div { padding: 8px 0; border-left: 0; border-bottom: 1px solid var(--border-soft); }
   .evidence-facts div:nth-child(odd) { padding-right: 10px; }
   .evidence-facts div:nth-child(even) { padding-left: 10px; border-left: 1px solid var(--border-soft); }
+  .evidence-criteria li { flex-direction: column; gap: 3px; }
   .command-health-grid { grid-template-columns: 1fr; }
 }
 
@@ -1925,7 +2023,9 @@ a.command-action:hover {
   .truth-grid div:nth-child(3),
   .value-field,
   .value-field:nth-child(2n),
-  .value-field:nth-child(3) { border-right: 0; border-bottom: 1px solid var(--border-soft); }
+  .value-field:nth-child(5n) { border-right: 0; border-bottom: 1px solid var(--border-soft); }
   .truth-grid div:last-child,
   .value-field:last-child { border-bottom: 0; }
+  .value-explanation dl,
+  .work-value-summary dl { grid-template-columns: 1fr; }
 }

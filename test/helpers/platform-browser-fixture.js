@@ -60,7 +60,47 @@ batchService.listBatches = async () => ({
       videoCount: 3,
       destinationCount: 2,
       createdAt: '2026-07-29T08:30:00.000Z',
-      updatedAt: '2026-07-29T08:42:00.000Z'
+      updatedAt: '2026-07-29T08:42:00.000Z',
+      missionValueContract: {
+        schema: 'chanter.mission-value-contract.v1',
+        objective: {
+          statement: 'Prepare six release drafts for founder review.',
+          acceptanceCriteria: [
+            'Six drafts are prepared.',
+            'Every draft has review evidence.'
+          ]
+        },
+        timing: {
+          startedAt: '2026-07-29T08:30:00.000Z',
+          targetBy: '2026-07-29T09:00:00.000Z',
+          completedAt: null
+        },
+        budgets: {
+          cost: { currency: 'USD', maximum: 10 },
+          humanAttentionMinutes: 20,
+          riskTolerance: 'low'
+        },
+        expected: {
+          evidenceRequired: 2,
+          reversibility: 'reversible'
+        }
+      },
+      missionValueEvidence: [
+        {
+          evidenceId: 'fixture-evidence-six-drafts',
+          acceptanceCriterion: 'Six drafts are prepared.',
+          verificationState: 'verified',
+          source: 'fixture batch preparation record',
+          observedAt: '2026-07-29T08:41:00.000Z'
+        },
+        {
+          evidenceId: 'fixture-evidence-review',
+          acceptanceCriterion: 'Every draft has review evidence.',
+          verificationState: 'verified',
+          source: 'fixture review evidence record',
+          observedAt: '2026-07-29T08:42:00.000Z'
+        }
+      ]
     },
     {
       batchId: 'fixture-running-002',
@@ -73,7 +113,13 @@ batchService.listBatches = async () => ({
       videoCount: 2,
       destinationCount: 2,
       createdAt: '2026-07-29T08:10:00.000Z',
-      updatedAt: '2026-07-29T08:39:00.000Z'
+      updatedAt: '2026-07-29T08:39:00.000Z',
+      missionValueContract: {
+        schema: 'chanter.mission-value-contract.v1',
+        objective: {
+          statement: 'Prepare the remaining drafts.'
+        }
+      }
     },
     {
       batchId: 'fixture-failed-003',
@@ -86,7 +132,15 @@ batchService.listBatches = async () => ({
       videoCount: 2,
       destinationCount: 1,
       createdAt: '2026-07-29T07:55:00.000Z',
-      updatedAt: '2026-07-29T08:15:00.000Z'
+      updatedAt: '2026-07-29T08:15:00.000Z',
+      missionValueContract: {
+        schema: 'chanter.mission-value-contract.v1',
+        objective: {
+          statement: 'Prepare two releases without errors.',
+          acceptanceCriteria: ['Both releases are prepared.']
+        }
+      },
+      missionValueEvidence: []
     },
     {
       batchId: 'fixture-complete-004',
@@ -99,7 +153,28 @@ batchService.listBatches = async () => ({
       videoCount: 3,
       destinationCount: 1,
       createdAt: '2026-07-29T07:20:00.000Z',
-      updatedAt: '2026-07-29T07:50:00.000Z'
+      updatedAt: '2026-07-29T07:50:00.000Z',
+      startedAt: '2026-07-29T07:20:00.000Z',
+      completedAt: '2026-07-29T07:50:00.000Z',
+      missionValueContract: {
+        schema: 'chanter.mission-value-contract.v1',
+        objective: {
+          statement: 'Complete the release review.',
+          acceptanceCriteria: ['All releases have verified review evidence.']
+        },
+        timing: {
+          targetBy: '2026-07-29T07:40:00.000Z'
+        }
+      },
+      missionValueEvidence: [
+        {
+          evidenceId: 'fixture-evidence-unmapped',
+          acceptanceCriterion: 'A different undeclared criterion.',
+          verificationState: 'verified',
+          source: 'fixture unmatched evidence',
+          observedAt: '2026-07-29T07:50:00.000Z'
+        }
+      ]
     }
   ]
 });
