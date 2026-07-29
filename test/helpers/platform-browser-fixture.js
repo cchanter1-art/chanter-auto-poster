@@ -47,137 +47,183 @@ firestoreModule.getFirestore = () => ({
 });
 
 const batchService = require('../../src/batchService');
-batchService.listBatches = async () => ({
-  batches: [
-    {
-      batchId: 'fixture-review-001',
-      userId: 'local-browser-founder',
-      status: 'ready',
-      itemCount: 6,
-      preparedCount: 6,
-      failedCount: 0,
-      acceptedCount: 0,
-      videoCount: 3,
-      destinationCount: 2,
-      createdAt: '2026-07-29T08:30:00.000Z',
-      updatedAt: '2026-07-29T08:42:00.000Z',
-      missionValueContract: {
-        schema: 'chanter.mission-value-contract.v1',
-        objective: {
-          statement: 'Prepare six release drafts for founder review.',
-          acceptanceCriteria: [
-            'Six drafts are prepared.',
-            'Every draft has review evidence.'
-          ]
-        },
-        timing: {
-          startedAt: '2026-07-29T08:30:00.000Z',
-          targetBy: '2026-07-29T09:00:00.000Z',
-          completedAt: null
-        },
-        budgets: {
-          cost: { currency: 'USD', maximum: 10 },
-          humanAttentionMinutes: 20,
-          riskTolerance: 'low'
-        },
-        expected: {
-          evidenceRequired: 2,
-          reversibility: 'reversible'
-        }
+const FIXTURE_BATCHES = [
+  {
+    batchId: 'fixture-review-001',
+    userId: 'local-browser-founder',
+    workspaceId: 'local-browser-workspace',
+    status: 'ready',
+    itemCount: 2,
+    preparedCount: 2,
+    failedCount: 0,
+    acceptedCount: 0,
+    videoCount: 1,
+    destinationCount: 2,
+    createdAt: '2026-07-29T08:30:00.000Z',
+    updatedAt: '2026-07-29T08:42:00.000Z'
+  },
+  {
+    batchId: 'fixture-pending-002',
+    userId: 'local-browser-founder',
+    workspaceId: 'local-browser-workspace',
+    status: 'completed',
+    itemCount: 2,
+    preparedCount: 2,
+    failedCount: 0,
+    acceptedCount: 2,
+    videoCount: 1,
+    destinationCount: 2,
+    createdAt: '2026-07-29T08:10:00.000Z',
+    updatedAt: '2026-07-29T09:00:00.000Z'
+  },
+  {
+    batchId: 'fixture-failed-003',
+    userId: 'local-browser-founder',
+    workspaceId: 'local-browser-workspace',
+    status: 'completed',
+    itemCount: 2,
+    preparedCount: 2,
+    failedCount: 0,
+    acceptedCount: 2,
+    videoCount: 1,
+    destinationCount: 2,
+    createdAt: '2026-07-29T07:55:00.000Z',
+    updatedAt: '2026-07-29T09:12:00.000Z'
+  },
+  {
+    batchId: 'fixture-verified-004',
+    userId: 'local-browser-founder',
+    workspaceId: 'local-browser-workspace',
+    status: 'completed',
+    itemCount: 2,
+    preparedCount: 2,
+    failedCount: 0,
+    acceptedCount: 2,
+    videoCount: 1,
+    destinationCount: 2,
+    createdAt: '2026-07-29T07:20:00.000Z',
+    updatedAt: '2026-07-29T09:11:00.000Z'
+  }
+];
+
+function fixtureItem(batchId, index, overrides = {}) {
+  return {
+    id: `${batchId}-post-${index + 1}`,
+    userId: 'local-browser-founder',
+    workspaceId: 'local-browser-workspace',
+    batchId,
+    sourceIndex: 0,
+    provider: index === 0 ? 'tiktok' : 'youtube',
+    providerSource: 'explicit',
+    accountId: index === 0 ? 'fixture-private-account-a' : 'fixture-private-account-b',
+    creationSource: '',
+    runtimeGraphId: '',
+    runtimeMissionId: '',
+    runtimeAction: '',
+    mediaType: 'video',
+    caption: 'Private fixture caption that must never reach the value objective.',
+    mediaPath: 'C:\\private\\fixture\\media.mp4',
+    scheduledAt: '2026-07-29T09:30:00.000Z',
+    status: 'scheduled',
+    approved: false,
+    approvalState: 'unapproved',
+    approvedAt: null,
+    approvedBy: '',
+    history: [{ event: 'validated', at: '2026-07-29T08:31:00.000Z' }],
+    lastResult: null,
+    postedAt: null,
+    createdAt: '2026-07-29T08:30:00.000Z',
+    updatedAt: '2026-07-29T08:42:00.000Z',
+    ...overrides
+  };
+}
+
+function approvedFixtureItem(batchId, index, overrides = {}) {
+  const approvedAt = `2026-07-29T08:4${index}:00.000Z`;
+  return fixtureItem(batchId, index, {
+    approved: true,
+    approvalState: 'approved',
+    approvedAt,
+    approvedBy: 'local-browser-reviewer',
+    history: [
+      { event: 'validated', at: '2026-07-29T08:31:00.000Z' },
+      { event: 'approved', at: approvedAt }
+    ],
+    updatedAt: approvedAt,
+    ...overrides
+  });
+}
+
+function successfulFixtureItem(batchId, index) {
+  const dispatchAt = `2026-07-29T09:0${index}:00.000Z`;
+  const completedAt = `2026-07-29T09:1${index}:00.000Z`;
+  const approved = approvedFixtureItem(batchId, index);
+  return {
+    ...approved,
+    status: 'posted',
+    postedAt: completedAt,
+    lastResult: { ok: true, mode: 'api', completedAt },
+    ...(index === 1 ? { providerVerification: { verifiedAt: completedAt } } : {}),
+    history: [
+      ...approved.history,
+      { event: 'publish_attempt', at: dispatchAt },
+      { event: 'posted', at: completedAt }
+    ],
+    updatedAt: completedAt
+  };
+}
+
+const FIXTURE_BATCH_ITEMS = new Map([
+  ['fixture-review-001', [
+    fixtureItem('fixture-review-001', 0),
+    fixtureItem('fixture-review-001', 1)
+  ]],
+  ['fixture-pending-002', [
+    approvedFixtureItem('fixture-pending-002', 0, {
+      status: 'processing',
+      history: [
+        { event: 'approved', at: '2026-07-29T08:40:00.000Z' },
+        { event: 'publish_attempt', at: '2026-07-29T09:00:00.000Z' }
+      ],
+      updatedAt: '2026-07-29T09:00:00.000Z'
+    }),
+    approvedFixtureItem('fixture-pending-002', 1)
+  ]],
+  ['fixture-failed-003', [
+    approvedFixtureItem('fixture-failed-003', 0, {
+      status: 'failed',
+      lastResult: {
+        ok: false,
+        mode: 'api',
+        code: 'PROVIDER_REFUSED',
+        completedAt: '2026-07-29T09:12:00.000Z'
       },
-      missionValueEvidence: [
-        {
-          evidenceId: 'fixture-evidence-six-drafts',
-          acceptanceCriterion: 'Six drafts are prepared.',
-          verificationState: 'verified',
-          source: 'fixture batch preparation record',
-          observedAt: '2026-07-29T08:41:00.000Z'
-        },
-        {
-          evidenceId: 'fixture-evidence-review',
-          acceptanceCriterion: 'Every draft has review evidence.',
-          verificationState: 'verified',
-          source: 'fixture review evidence record',
-          observedAt: '2026-07-29T08:42:00.000Z'
-        }
-      ]
-    },
-    {
-      batchId: 'fixture-running-002',
-      userId: 'local-browser-founder',
-      status: 'preparing',
-      itemCount: 4,
-      preparedCount: 2,
-      failedCount: 0,
-      acceptedCount: 0,
-      videoCount: 2,
-      destinationCount: 2,
-      createdAt: '2026-07-29T08:10:00.000Z',
-      updatedAt: '2026-07-29T08:39:00.000Z',
-      missionValueContract: {
-        schema: 'chanter.mission-value-contract.v1',
-        objective: {
-          statement: 'Prepare the remaining drafts.'
-        }
-      }
-    },
-    {
-      batchId: 'fixture-failed-003',
-      userId: 'local-browser-founder',
-      status: 'attention_required',
-      itemCount: 2,
-      preparedCount: 1,
-      failedCount: 1,
-      acceptedCount: 0,
-      videoCount: 2,
-      destinationCount: 1,
-      createdAt: '2026-07-29T07:55:00.000Z',
-      updatedAt: '2026-07-29T08:15:00.000Z',
-      missionValueContract: {
-        schema: 'chanter.mission-value-contract.v1',
-        objective: {
-          statement: 'Prepare two releases without errors.',
-          acceptanceCriteria: ['Both releases are prepared.']
-        }
-      },
-      missionValueEvidence: []
-    },
-    {
-      batchId: 'fixture-complete-004',
-      userId: 'local-browser-founder',
-      status: 'completed',
-      itemCount: 3,
-      preparedCount: 3,
-      failedCount: 0,
-      acceptedCount: 3,
-      videoCount: 3,
-      destinationCount: 1,
-      createdAt: '2026-07-29T07:20:00.000Z',
-      updatedAt: '2026-07-29T07:50:00.000Z',
-      startedAt: '2026-07-29T07:20:00.000Z',
-      completedAt: '2026-07-29T07:50:00.000Z',
-      missionValueContract: {
-        schema: 'chanter.mission-value-contract.v1',
-        objective: {
-          statement: 'Complete the release review.',
-          acceptanceCriteria: ['All releases have verified review evidence.']
-        },
-        timing: {
-          targetBy: '2026-07-29T07:40:00.000Z'
-        }
-      },
-      missionValueEvidence: [
-        {
-          evidenceId: 'fixture-evidence-unmapped',
-          acceptanceCriterion: 'A different undeclared criterion.',
-          verificationState: 'verified',
-          source: 'fixture unmatched evidence',
-          observedAt: '2026-07-29T07:50:00.000Z'
-        }
-      ]
-    }
-  ]
-});
+      history: [
+        { event: 'approved', at: '2026-07-29T08:40:00.000Z' },
+        { event: 'publish_attempt', at: '2026-07-29T09:00:00.000Z' },
+        { event: 'failed', at: '2026-07-29T09:12:00.000Z' }
+      ],
+      updatedAt: '2026-07-29T09:12:00.000Z'
+    }),
+    successfulFixtureItem('fixture-failed-003', 1)
+  ]],
+  ['fixture-verified-004', [
+    successfulFixtureItem('fixture-verified-004', 0),
+    successfulFixtureItem('fixture-verified-004', 1)
+  ]]
+]);
+
+batchService.listBatches = async () => ({ batches: FIXTURE_BATCHES });
+batchService.getBatchView = async (context, batchId, options = {}) => {
+  void context;
+  if (options.autoResume !== false) {
+    throw new Error('Browser value fixture must remain read-only.');
+  }
+  const batch = FIXTURE_BATCHES.find((record) => record.batchId === batchId);
+  const items = FIXTURE_BATCH_ITEMS.get(batchId);
+  if (!batch || !items) throw new Error('Fixture batch not found.');
+  return { batch, items };
+};
 batchService.listSeries = async () => ({ series: [] });
 batchService.listDestinations = async () => ({ destinations: [] });
 

@@ -5,15 +5,29 @@
 // producer behind the same contract every other module uses, and the shell no
 // longer knows it exists by name.
 //
-// The read is exactly the one the shell already performed — the same durable
-// batch list, the same projection, the same execution context — so AutoPoster
-// work on every surface is unchanged. This is a re-seating, not a rewrite.
+// The work list stays the same durable batch list. Eligible batches receive an
+// additive, read-only child-post reconciliation through batchService's existing
+// view seam; that read explicitly disables preparation auto-resume.
 
 const batchService = require('./batchService');
 const applicationService = require('./autoposterApplicationService');
+const { projectAutoPosterMissionValue } = require('./platformAutoPosterMissionValue');
 const platformStatus = require('./platformStatus');
 
 const MODULE_ID = 'autoposter';
+const MISSION_VALUE_KEYS = Object.freeze([
+  'missionValueContract',
+  'missionValueEvidence',
+  'startedAt',
+  'completedAt',
+  'retainedLessons'
+]);
+
+function withoutMissionValueMetadata(batch) {
+  const clean = { ...(batch || {}) };
+  for (const key of MISSION_VALUE_KEYS) delete clean[key];
+  return clean;
+}
 
 // listBatches is resolved per call rather than captured at require time so the
 // provider always uses the live service binding.
@@ -34,10 +48,32 @@ function createAutoPosterWorkProvider(options = {}) {
         listQueue ? listQueue(context, { limit: applicationService.MAX_QUEUE_LIMIT || 100 }) : null
       ]);
       const batches = (batchResult && batchResult.batches) || [];
+      const getBatchView = options.getBatchView || batchService.getBatchView;
+      const projectedBatches = await Promise.all(batches.map(async (sourceBatch) => {
+        const batch = withoutMissionValueMetadata(sourceBatch);
+        const batchId = String(batch.batchId || '').trim();
+        if (!batchId || typeof getBatchView !== 'function') {
+          return platformStatus.projectAutoPosterBatch(sourceBatch);
+        }
+        try {
+          const view = await getBatchView(context, batchId, { autoResume: false });
+          const metadata = projectAutoPosterMissionValue(
+            view && view.batch ? view.batch : batch,
+            view && view.items
+          );
+          return platformStatus.projectAutoPosterBatch(metadata ? { ...batch, ...metadata } : batch);
+        } catch {
+          // Mission value is optional. If the evidence view is unavailable,
+          // keep the existing work row rather than degrading the work source.
+          // Pre-existing provider-owned metadata remains compatible when no
+          // evidence view can be read at all.
+          return platformStatus.projectAutoPosterBatch(sourceBatch);
+        }
+      }));
       const standaloneRuntimeJobs = ((queueResult && queueResult.items) || [])
         .filter((post) => String(post.runtimeGraphId || '').trim() && !String(post.batchId || '').trim());
       return [
-        ...batches.map(platformStatus.projectAutoPosterBatch),
+        ...projectedBatches,
         ...standaloneRuntimeJobs.map(platformStatus.projectAutoPosterRuntimeJob)
       ];
     }
