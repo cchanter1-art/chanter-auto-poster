@@ -7,42 +7,100 @@
   <title>Evidence — CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
-<body>
+<body class="platform-command-center">
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
+    <main class="command-main">
+      <%- include('_platform-page-header', {
+        eyebrow: 'Durable work record',
+        title: 'Evidence',
+        subtitle: 'Search measured work records without changing execution state.',
+        action: { label: 'Inspect', href: '/platform/work', enabled: true, reason: '' }
+      }) %>
 
-    <div class="breadcrumb"><a href="/platform">Platform</a> / Evidence</div>
-    <h1 class="page-title">Evidence</h1>
-    <p class="page-subtitle">
-      For every unit of work: what was prepared, what failed, what was approved, and where to inspect it.
-    </p>
+      <% if (workError) { %>
+        <div class="notice notice-error" data-testid="work-error">Evidence is unavailable. <%= workError %></div>
+      <% } %>
+      <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
 
-    <% if (workError) { %>
-      <div class="notice notice-error" data-testid="work-error">Evidence is unavailable right now. &middot; <%= workError %></div>
-    <% } %>
-    <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
-
-    <% if (items.length === 0) { %>
-      <div class="empty-state" data-testid="evidence-empty">
-        <div>No evidence records yet.</div>
+      <div class="evidence-tools" aria-label="Evidence filters">
+        <label>
+          <span>Search</span>
+          <input id="evidence-search" type="search" placeholder="Title, module, or state" autocomplete="off">
+        </label>
+        <label>
+          <span>State</span>
+          <select id="evidence-state">
+            <option value="">All states</option>
+            <% [...new Set(items.map(function (item) { return item.state; }))].forEach(function (state) { %>
+              <option value="<%= state %>"><%= platformStatus.presentation(state).label %></option>
+            <% }); %>
+          </select>
+        </label>
+        <span class="evidence-result-count" data-testid="evidence-result-count"><%= items.length %> visible</span>
       </div>
-    <% } else { %>
-      <div class="batch-list" data-testid="evidence-list">
-        <% items.forEach(function (item) { %>
-          <%- include('_platform-work-row', {
-            item: item,
-            view: platformStatus.presentation(item.state),
-            metaText: item.createdAt,
-            countsText: `${item.counts.prepared} prepared · ${item.counts.failed} failed · ${item.counts.accepted} approved`,
-            chipLabel: platformStatus.presentation(item.state).label
-          }) %>
-        <% }); %>
-      </div>
-    <% } %>
 
-    <p class="footer-note">
-      Full internal execution evidence (agent run ledger, runtime evidence) is retained behind Operator and is not exposed here.
-    </p>
+      <% if (items.length === 0) { %>
+        <div class="command-section command-empty" data-testid="evidence-empty">No durable work evidence is available.</div>
+      <% } else { %>
+        <div class="evidence-ledger" data-testid="evidence-list">
+          <% items.forEach(function (item) { %>
+            <article
+              class="evidence-ledger-row"
+              data-evidence-row
+              data-work="<%= item.workId %>"
+              data-module="<%= item.moduleId %>"
+              data-state="<%= item.state %>"
+              data-search="<%= `${item.title} ${item.moduleName} ${item.state}`.toLowerCase() %>"
+            >
+              <div class="evidence-ledger-main">
+                <span class="command-eyebrow"><%= item.moduleName %></span>
+                <h2><%= item.title %></h2>
+                <span class="evidence-time"><%= item.updatedLabel %></span>
+              </div>
+              <dl class="evidence-facts">
+                <div><dt>Availability</dt><dd><%= item.evidenceState %></dd></div>
+                <div><dt>Verification</dt><dd>Not measured</dd></div>
+                <div><dt>State</dt><dd><%= platformStatus.presentation(item.state).label %></dd></div>
+                <div><dt>Record</dt><dd><%= item.workId %></dd></div>
+              </dl>
+              <% if (item.nextAction.enabled) { %>
+                <a class="command-action" href="<%= item.nextAction.href %>">View Evidence</a>
+              <% } else { %>
+                <span class="command-action command-action-disabled" aria-disabled="true" title="<%= item.nextAction.reason %>">View Evidence</span>
+              <% } %>
+            </article>
+          <% }); %>
+        </div>
+        <div id="evidence-filter-empty" class="command-section command-empty" hidden>No evidence matches this filter.</div>
+      <% } %>
+      <p class="footer-note">Internal runtime ledgers stay behind Operator and are not exposed here.</p>
+    </main>
   </div>
+  <script>
+    (() => {
+      const rows = Array.from(document.querySelectorAll('[data-evidence-row]'));
+      const search = document.getElementById('evidence-search');
+      const state = document.getElementById('evidence-state');
+      const count = document.querySelector('[data-testid="evidence-result-count"]');
+      const empty = document.getElementById('evidence-filter-empty');
+      if (!search || !state || !count) return;
+      const apply = () => {
+        const query = search.value.trim().toLowerCase();
+        const selectedState = state.value;
+        let visible = 0;
+        rows.forEach((row) => {
+          const matches = (!query || row.dataset.search.includes(query))
+            && (!selectedState || row.dataset.state === selectedState);
+          row.hidden = !matches;
+          if (matches) visible += 1;
+        });
+        count.textContent = `${visible} visible`;
+        if (empty) empty.hidden = visible !== 0;
+      };
+      search.addEventListener('input', apply);
+      state.addEventListener('change', apply);
+    })();
+  </script>
 </body>
 </html>

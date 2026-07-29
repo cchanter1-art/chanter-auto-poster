@@ -1,0 +1,17 @@
+<header class="command-page-header">
+  <div>
+    <div class="command-kicker"><%= eyebrow %></div>
+    <h1 class="page-title"><%= title %></h1>
+    <p class="page-subtitle"><%= subtitle %></p>
+  </div>
+  <div class="command-page-action">
+    <span class="command-action-label">Next safe action</span>
+    <% if (action && action.href) { %>
+      <a class="command-action" href="<%= action.href %>"><%= action.label %></a>
+    <% } else { %>
+      <span class="command-action command-action-disabled" aria-disabled="true" title="<%= action && action.reason ? action.reason : 'Unavailable' %>">
+        <%= action && action.label ? action.label : 'Unavailable' %>
+      </span>
+    <% } %>
+  </div>
+</header>

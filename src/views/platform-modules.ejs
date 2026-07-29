@@ -7,50 +7,62 @@
   <title>Modules — CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
-<body>
+<body class="platform-command-center">
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
+    <main class="command-main">
+      <%- include('_platform-page-header', {
+        eyebrow: 'Capability map',
+        title: 'Modules',
+        subtitle: 'Customer capability and internal ownership stay visibly separate.',
+        action: commandCenter.modules.find(function (module) { return module.action.enabled; }).action
+      }) %>
 
-    <div class="breadcrumb"><a href="/platform">Platform</a> / Modules</div>
-    <h1 class="page-title">Modules</h1>
-    <p class="page-subtitle">
-      Every module declares who owns it.
-    </p>
-
-    <h2 class="section-title">Customer modules</h2>
-    <div class="module-grid" data-testid="customer-modules">
-      <% customerModules.forEach(function (module) { %>
-        <a class="module-card" href="<%= module.href %>" data-module="<%= module.id %>" data-surface="customer">
-          <div class="module-card-head">
-            <div class="module-name"><%= module.name %></div>
-            <span class="chip chip-ready">Active</span>
+      <section class="command-section" aria-labelledby="customer-modules-title">
+        <div class="command-section-heading">
+          <div>
+            <span class="command-eyebrow">Customer</span>
+            <h2 id="customer-modules-title">Available modules</h2>
           </div>
-          <div class="module-desc"><%= module.summary %></div>
-          <div class="module-owner">Owner: <%= module.owner %></div>
-        </a>
-      <% }); %>
-    </div>
-
-    <h2 class="section-title">Internal modules</h2>
-    <p class="section-note">
-      Operated behind Operator. Listed for transparency only — no control over them exists on this surface.
-    </p>
-    <div class="module-grid" data-testid="internal-modules">
-      <% internalModules.forEach(function (module) { %>
-        <div class="module-card module-card-internal" data-module="<%= module.id %>" data-surface="internal">
-          <div class="module-card-head">
-            <div class="module-name"><%= module.name %></div>
-            <span class="chip chip-neutral">Internal</span>
-          </div>
-          <div class="module-desc"><%= module.summary %></div>
-          <div class="module-owner">Owner: <%= module.owner %></div>
         </div>
-      <% }); %>
-    </div>
+        <div class="module-grid command-module-grid" data-testid="customer-modules">
+          <% commandCenter.modules.filter(function (module) { return module.surface === 'customer'; }).forEach(function (module) { %>
+            <article class="module-card command-module-card" data-module="<%= module.id %>" data-surface="customer">
+              <div class="module-card-head">
+                <div class="module-name"><%= module.name %></div>
+                <span class="chip <%= module.chip %>"><%= module.status %></span>
+              </div>
+              <p class="module-desc"><%= module.capability %></p>
+              <div class="module-owner">Owner: <%= module.owner %></div>
+              <a class="command-action" href="<%= module.action.href %>"><%= module.action.label %></a>
+            </article>
+          <% }); %>
+        </div>
+      </section>
 
-    <p class="footer-note">
-      Repository control, commit, push, deployment and worker administration remain internal only.
-    </p>
+      <section class="command-section" aria-labelledby="internal-modules-title">
+        <div class="command-section-heading">
+          <div>
+            <span class="command-eyebrow">Internal</span>
+            <h2 id="internal-modules-title">Ownership only</h2>
+          </div>
+        </div>
+        <p class="command-section-note">Controls remain behind Operator. This surface exposes no internal action.</p>
+        <div class="module-grid command-module-grid" data-testid="internal-modules">
+          <% commandCenter.modules.filter(function (module) { return module.surface === 'internal'; }).forEach(function (module) { %>
+            <article class="module-card command-module-card module-card-internal" data-module="<%= module.id %>" data-surface="internal">
+              <div class="module-card-head">
+                <div class="module-name"><%= module.name %></div>
+                <span class="chip <%= module.chip %>"><%= module.status %></span>
+              </div>
+              <p class="module-desc"><%= module.capability %></p>
+              <div class="module-owner">Owner: <%= module.owner %></div>
+              <span class="command-action command-action-disabled" aria-disabled="true" title="<%= module.action.reason %>"><%= module.action.label %></span>
+            </article>
+          <% }); %>
+        </div>
+      </section>
+    </main>
   </div>
 </body>
 </html>

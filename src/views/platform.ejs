@@ -4,22 +4,160 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>CHANTER Platform</title>
+  <title>Overview — CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
-<body class="platform-home">
+<body class="platform-command-center">
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
 
     <main class="platform-home-main">
-      <h1>CHANTER</h1>
-      <a class="platform-home-module" href="/platform/autoposter/compose" data-module="<%= autoPosterModule.id %>">
-        AutoPoster
-      </a>
-      <nav class="platform-home-actions" aria-label="Platform destinations">
-        <a href="/platform/autoposter/activity">Activity</a>
-        <a href="/platform/autoposter/accounts">Account</a>
-      </nav>
+      <%- include('_platform-page-header', {
+        eyebrow: 'Founder command center',
+        title: 'Overview',
+        subtitle: 'System truth, work, decisions, and evidence in one place.',
+        action: {
+          label: 'Compose',
+          href: '/platform/autoposter/compose'
+        }
+      }) %>
+
+      <section class="command-section system-state-panel" aria-labelledby="system-state-title" data-testid="overview-system-state">
+        <div class="command-section-heading">
+          <div>
+            <span class="command-eyebrow">System state</span>
+            <h2 id="system-state-title"><%= commandCenter.systemState.label %></h2>
+          </div>
+          <span class="chip <%= commandCenter.systemState.chip %>"><%= commandCenter.systemState.label %></span>
+        </div>
+        <p class="command-section-note"><%= commandCenter.systemState.reason %></p>
+        <dl class="truth-grid">
+          <div><dt>Environment</dt><dd><%= commandCenter.environment.label %></dd></div>
+          <div><dt>Canonical execution</dt><dd><%= commandCenter.health.canonicalExecution.status %></dd></div>
+          <div><dt>Default Composer</dt><dd><%= commandCenter.health.canonicalExecution.defaultComposerPath ? 'Active' : 'Inactive' %></dd></div>
+          <div><dt>Publishing-ready channels</dt><dd><%= commandCenter.health.connections.error ? 'Unavailable' : commandCenter.health.connections.publishingReadyCount %></dd></div>
+          <div><dt>Storage</dt><dd><%= commandCenter.health.storage.reachable === true ? 'Reachable' : (commandCenter.health.storage.reachable === false ? 'Unreachable' : 'Unavailable') %></dd></div>
+          <div><dt>Scheduler</dt><dd><%= commandCenter.health.scheduler.inMemoryTimer ? 'In-process timer' : 'External only' %></dd></div>
+        </dl>
+      </section>
+
+      <section id="attention" class="command-section" aria-labelledby="attention-title" data-testid="overview-attention">
+        <div class="command-section-heading">
+          <div>
+            <span class="command-eyebrow">Needs attention</span>
+            <h2 id="attention-title"><%= commandCenter.attention.count %> item<%= commandCenter.attention.count === 1 ? '' : 's' %></h2>
+          </div>
+          <a class="text-action" href="/platform/health">Inspect</a>
+        </div>
+        <% if (commandCenter.attention.items.length === 0) { %>
+          <div class="command-empty">No measured item needs attention.</div>
+        <% } else { %>
+          <div class="attention-list">
+            <% commandCenter.attention.items.slice(0, 5).forEach(function (item) { %>
+              <a class="attention-item" href="<%= item.href %>" data-severity="<%= item.severity %>">
+                <span class="attention-marker" aria-hidden="true"></span>
+                <span><strong><%= item.title %></strong><small><%= item.detail %></small></span>
+                <span class="text-action"><%= item.action %></span>
+              </a>
+            <% }); %>
+          </div>
+        <% } %>
+      </section>
+
+      <div class="command-split">
+        <section class="command-section" aria-labelledby="active-work-title" data-testid="overview-active-work">
+          <div class="command-section-heading">
+            <div>
+              <span class="command-eyebrow">Active work</span>
+              <h2 id="active-work-title"><%= commandCenter.activeWork.length %> visible</h2>
+            </div>
+            <a class="text-action" href="/platform/work">Inspect</a>
+          </div>
+          <% if (commandCenter.activeWork.length === 0) { %>
+            <div class="command-empty">No active work is visible.</div>
+          <% } else { %>
+            <div class="compact-list">
+              <% commandCenter.activeWork.forEach(function (item) { const view = platformStatus.presentation(item.state); %>
+                <%- include('_platform-work-row', {
+                  item: item,
+                  view: view,
+                  metaText: item.updatedLabel,
+                  countsText: `${item.counts.accepted}/${item.counts.total} approved`,
+                  chipLabel: view.label
+                }) %>
+              <% }); %>
+            </div>
+          <% } %>
+        </section>
+
+        <section class="command-section" aria-labelledby="modules-title" data-testid="overview-modules">
+          <div class="command-section-heading">
+            <div>
+              <span class="command-eyebrow">Modules</span>
+              <h2 id="modules-title"><%= commandCenter.modules.length %> registered</h2>
+            </div>
+            <a class="text-action" href="/platform/modules">Inspect</a>
+          </div>
+           <div class="compact-module-list">
+             <% commandCenter.modules.slice(0, 5).forEach(function (module) { %>
+              <% if (module.action.enabled) { %>
+                <a class="compact-module" href="<%= module.action.href %>" data-module="<%= module.id %>" data-surface="<%= module.surface %>">
+                  <span><strong><%= module.name %></strong><small><%= module.owner %></small></span>
+                  <span class="chip <%= module.chip %>"><%= module.status %></span>
+                </a>
+              <% } else { %>
+                <div class="compact-module" data-module="<%= module.id %>" data-surface="<%= module.surface %>">
+                  <span><strong><%= module.name %></strong><small><%= module.owner %></small></span>
+                  <span class="chip <%= module.chip %>"><%= module.status %></span>
+                </div>
+              <% } %>
+             <% }); %>
+           </div>
+        </section>
+      </div>
+
+      <section class="command-section" aria-labelledby="recent-evidence-title" data-testid="overview-evidence">
+        <div class="command-section-heading">
+          <div>
+            <span class="command-eyebrow">Recent evidence</span>
+            <h2 id="recent-evidence-title"><%= commandCenter.recentEvidence.length %> record<%= commandCenter.recentEvidence.length === 1 ? '' : 's' %></h2>
+          </div>
+          <a class="text-action" href="/platform/evidence">View Evidence</a>
+        </div>
+        <% if (commandCenter.recentEvidence.length === 0) { %>
+          <div class="command-empty">No durable work evidence is available.</div>
+        <% } else { %>
+          <div class="evidence-strip">
+            <% commandCenter.recentEvidence.forEach(function (item) { %>
+              <a class="evidence-card" href="<%= item.nextAction.href || '/platform/evidence' %>">
+                <span class="command-eyebrow"><%= item.moduleName %></span>
+                <strong><%= item.title %></strong>
+                <small><%= item.updatedLabel %></small>
+                <span class="text-action">View Evidence</span>
+              </a>
+            <% }); %>
+          </div>
+        <% } %>
+      </section>
+
+      <section class="value-ribbon" aria-labelledby="value-title" data-testid="value-ribbon">
+        <div class="value-ribbon-heading">
+          <div>
+            <span class="command-eyebrow">Read-only CHANTER Value</span>
+            <h2 id="value-title">Measured value state</h2>
+          </div>
+          <code><%= commandCenter.valueRibbon.equation %></code>
+        </div>
+        <div class="value-fields">
+          <% commandCenter.valueRibbon.fields.forEach(function (field) { %>
+            <a href="<%= field.href %>" class="value-field">
+              <span><%= field.label %></span>
+              <strong><%= field.value %></strong>
+            </a>
+          <% }); %>
+        </div>
+        <p><%= commandCenter.valueRibbon.equationNote %></p>
+      </section>
     </main>
   </div>
 </body>

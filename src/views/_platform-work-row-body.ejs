@@ -11,6 +11,15 @@
 <div>
   <div><%= item.title %></div>
   <div class="meta"><%= item.moduleName %><% if (metaText) { %> &middot; <%= metaText %><% } %></div>
+  <% if (item.updatedLabel || item.evidenceState) { %>
+    <div class="work-row-facts">
+      <span>Updated: <%= item.updatedLabel || 'Unavailable' %></span>
+      <span>Evidence: <%= item.evidenceState || 'Not measured' %></span>
+    </div>
+  <% } %>
 </div>
 <div class="counts"><%= countsText %></div>
 <span class="chip <%= view.chip %>"><%= chipLabel %></span>
+<% if (item.nextAction) { %>
+  <span class="work-row-action<%= item.nextAction.enabled ? '' : ' work-row-action-disabled' %>"><%= item.nextAction.label %></span>
+<% } %>

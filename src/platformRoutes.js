@@ -3,7 +3,7 @@
 // CHANTER Platform customer surface: the unified shell (Overview, Modules,
 // Work, Approvals, Evidence, System health) with AutoPoster mounted as its
 // first module (massive upload -> AI preparation -> human review -> staggered
-// scheduling). Pages are Greek-first; every API returns JSON. All routes sit
+// scheduling). Shell pages are English-only; every API returns JSON. All routes sit
 // behind the same admin session and CSRF origin middleware as the classic
 // console — this file adds no new authority, only a new surface over the
 // existing application-service boundary.
@@ -26,11 +26,13 @@ const canonicalExecution = require('./platformCanonicalExecution');
 const platformModules = require('./platformModules');
 const platformStatus = require('./platformStatus');
 const platformWorkProviders = require('./platformWorkProviders');
+const platformCommandCenter = require('./platformCommandCenter');
 const { createAutoPosterWorkProvider } = require('./platformAutoPosterProvider');
 const { createRecurringSeriesWorkProvider } = require('./platformSeriesProvider');
 const { createOperatorWorkProvider } = require('./platformOperatorProvider');
 const { readConnectedHealth } = require('./runtimeConnectedHealth');
 const providers = require('./providers');
+const scheduler = require('./scheduler');
 const autoMusic = require('./autoMusic');
 const autoCaption = require('./autoCaption');
 const maxScheduler = require('./maxScheduler');
@@ -260,7 +262,60 @@ async function loadPlatformHealth() {
   };
 }
 
-// ── Pages (Greek-first, admin session) ─────────────────────────────────────
+async function loadPlatformConnections(req) {
+  try {
+    const result = await batchService.listDestinations(websiteContext(req));
+    const destinations = Array.isArray(result && result.destinations) ? result.destinations : [];
+    return {
+      connectedCount: destinations.length,
+      publishingReadyCount: destinations.filter((item) => item.publishingReady === true).length,
+      providers: [...new Set(destinations.map((item) => String(item.provider || '')).filter(Boolean))],
+      error: ''
+    };
+  } catch (error) {
+    return {
+      connectedCount: 0,
+      publishingReadyCount: 0,
+      providers: [],
+      error: safeDiagnosticText((error && error.message) || 'Connected channels are unavailable.')
+    };
+  }
+}
+
+async function loadPlatformCommandCenter(req) {
+  const [work, health, connections] = await Promise.all([
+    loadPlatformWork(req),
+    loadPlatformHealth(),
+    loadPlatformConnections(req)
+  ]);
+  const providerStatuses = [
+    providers.PROVIDER_TIKTOK,
+    providers.PROVIDER_YOUTUBE,
+    providers.PROVIDER_INSTAGRAM
+  ].map((providerId) => providers.getProviderStatus(providerId)).filter(Boolean);
+  const commandCenter = platformCommandCenter.buildCommandCenter({
+    work,
+    health,
+    connections,
+    providerStatuses,
+    canonicalExecutionEnabled: config.canonicalExecution.enabled,
+    runtimeControlConfigured: Boolean(config.runtimeControl.token),
+    schedulerState: scheduler.getSchedulerState(),
+    firestoreEmulatorHost: process.env.FIRESTORE_EMULATOR_HOST || ''
+  });
+  return { commandCenter };
+}
+
+function commandCenterLocals(loaded) {
+  return {
+    commandCenter: loaded.commandCenter,
+    workSummary: loaded.commandCenter.work.summary,
+    workError: loaded.commandCenter.work.error,
+    workDegraded: loaded.commandCenter.work.degraded
+  };
+}
+
+// ── Pages (English-only, admin session) ────────────────────────────────────
 
 function autoPosterWorkItems(work) {
   return work.items.filter((item) => {
@@ -288,74 +343,64 @@ function renderAutoPosterList(mode) {
   });
 }
 
-router.get('/platform', requireAdminPage, (req, res) => {
+router.get('/platform', requireAdminPage, asyncRoute(async (req, res) => {
+  const loaded = await loadPlatformCommandCenter(req);
   res.render('platform', {
     appName: config.appName,
-    active: 'home',
-    autoPosterModule: platformModules.getModule('autoposter')
+    active: 'overview',
+    platformStatus,
+    ...commandCenterLocals(loaded)
   });
-});
+}));
 
-router.get('/platform/modules', requireAdminPage, (req, res) => {
+router.get('/platform/modules', requireAdminPage, asyncRoute(async (req, res) => {
+  const loaded = await loadPlatformCommandCenter(req);
   res.render('platform-modules', {
     appName: config.appName,
     active: 'modules',
-    customerModules: platformModules.listCustomerModules(),
-    internalModules: platformModules.listInternalModules()
+    ...commandCenterLocals(loaded)
   });
-});
+}));
 
 router.get('/platform/work', requireAdminPage, asyncRoute(async (req, res) => {
-  const work = await loadPlatformWork(req);
+  const loaded = await loadPlatformCommandCenter(req);
   res.render('platform-work', {
     appName: config.appName,
     active: 'work',
     platformStatus,
-    items: work.items,
-    workSummary: work.summary,
-    workError: work.error,
-    workDegraded: work.degraded,
-    firstCustomerModule: platformModules.listCustomerModules()[0] || null
+    ...commandCenterLocals(loaded)
   });
 }));
 
 router.get('/platform/approvals', requireAdminPage, asyncRoute(async (req, res) => {
-  const work = await loadPlatformWork(req);
+  const loaded = await loadPlatformCommandCenter(req);
   res.render('platform-approvals', {
     appName: config.appName,
     active: 'approvals',
     platformStatus,
-    items: work.items.filter((item) => item.needsApproval),
-    workError: work.error,
-    workDegraded: work.degraded
+    items: loaded.commandCenter.work.items.filter((item) => item.needsApproval),
+    ...commandCenterLocals(loaded)
   });
 }));
 
 router.get('/platform/evidence', requireAdminPage, asyncRoute(async (req, res) => {
-  const work = await loadPlatformWork(req);
+  const loaded = await loadPlatformCommandCenter(req);
   res.render('platform-evidence', {
     appName: config.appName,
     active: 'evidence',
     platformStatus,
-    // Only work that actually carries a durable record is indexable here.
-    items: work.items.filter((item) => item.evidenceAvailable),
-    workError: work.error,
-    workDegraded: work.degraded
+    items: loaded.commandCenter.evidenceItems,
+    ...commandCenterLocals(loaded)
   });
 }));
 
 router.get('/platform/health', requireAdminPage, asyncRoute(async (req, res) => {
-  const [work, health] = await Promise.all([loadPlatformWork(req), loadPlatformHealth()]);
+  const loaded = await loadPlatformCommandCenter(req);
   res.render('platform-health', {
     appName: config.appName,
     active: 'health',
-    health,
-    workSummary: work.summary,
-    workError: work.error,
-    workDegraded: work.degraded,
     workProviderCount: workRegistry.list().length,
-    customerModuleCount: platformModules.listCustomerModules().length,
-    internalModuleCount: platformModules.listInternalModules().length
+    ...commandCenterLocals(loaded)
   });
 }));
 

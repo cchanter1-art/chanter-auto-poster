@@ -7,52 +7,56 @@
   <title>Work — CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
-<body>
+<body class="platform-command-center">
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
+    <main class="command-main">
+      <%- include('_platform-page-header', {
+        eyebrow: 'Shared work state',
+        title: 'Work',
+        subtitle: 'Running, waiting, attention, and complete across registered modules.',
+        action: commandCenter.modules.find(function (module) { return module.action.enabled; }).action
+      }) %>
 
-    <div class="breadcrumb"><a href="/platform">Platform</a> / Work</div>
-    <h1 class="page-title">Work</h1>
-    <p class="page-subtitle">
-      All platform work, from every module, in one shared state vocabulary.
-    </p>
+      <% if (workError) { %>
+        <div class="notice notice-error" data-testid="work-error">Work is unavailable. <%= workError %></div>
+      <% } %>
+      <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
 
-    <% if (workError) { %>
-      <div class="notice notice-error" data-testid="work-error">Work is unavailable right now. &middot; <%= workError %></div>
-    <% } %>
-    <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
-
-    <div class="batch-summary" data-testid="work-summary">
-      <div class="stat"><strong><%= workSummary.total %></strong> total</div>
-      <div class="stat"><strong><%= workSummary.running %></strong> running</div>
-      <div class="stat"><strong><%= workSummary.awaitingApproval %></strong> waiting for approval</div>
-      <div class="stat"><strong><%= workSummary.failed %></strong> failed</div>
-    </div>
-
-    <% if (items.length === 0) { %>
-      <div class="empty-state" data-testid="work-empty">
-        <div>No work yet.</div>
-        <% if (locals.firstCustomerModule) { %>
-          <div class="en">Start one from the <a href="<%= locals.firstCustomerModule.href %>"><%= locals.firstCustomerModule.name %></a> module.</div>
-        <% } %>
+      <div class="batch-summary command-summary" data-testid="work-summary">
+        <div class="stat"><strong><%= workSummary.total %></strong> total</div>
+        <div class="stat"><strong><%= workSummary.running %></strong> running</div>
+        <div class="stat"><strong><%= workSummary.awaitingApproval %></strong> waiting</div>
+        <div class="stat"><strong><%= workSummary.failed %></strong> failed</div>
       </div>
-    <% } else { %>
-      <div class="batch-list" data-testid="work-list">
-        <% items.forEach(function (item) { %>
-          <%- include('_platform-work-row', {
-            item: item,
-            view: platformStatus.presentation(item.state),
-            metaText: item.stateReason,
-            countsText: `${item.counts.accepted}/${item.counts.total} approved`,
-            chipLabel: platformStatus.presentation(item.state).label
-          }) %>
+
+      <div class="work-groups" data-testid="work-groups">
+        <% commandCenter.workGroups.forEach(function (group) { %>
+          <section class="command-section work-group" data-work-group="<%= group.id %>" aria-labelledby="work-group-<%= group.id %>">
+            <div class="command-section-heading">
+              <h2 id="work-group-<%= group.id %>"><%= group.label %></h2>
+              <span class="chip chip-neutral"><%= group.items.length %></span>
+            </div>
+            <% if (group.items.length === 0) { %>
+              <div class="command-empty">No work in this state.</div>
+            <% } else { %>
+              <div class="batch-list">
+                <% group.items.forEach(function (item) { const view = platformStatus.presentation(item.state); %>
+                  <%- include('_platform-work-row', {
+                    item: item,
+                    view: view,
+                    metaText: item.stateReason,
+                    countsText: `${item.counts.accepted}/${item.counts.total} approved`,
+                    chipLabel: view.label
+                  }) %>
+                <% }); %>
+              </div>
+            <% } %>
+          </section>
         <% }); %>
       </div>
-    <% } %>
-
-    <p class="footer-note">
-      Actions happen inside the module that owns the work. This page is read-only.
-    </p>
+      <p class="footer-note">This page is read-only. Work changes only inside its owning module.</p>
+    </main>
   </div>
 </body>
 </html>

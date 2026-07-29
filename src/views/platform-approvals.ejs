@@ -7,44 +7,54 @@
   <title>Approvals — CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
-<body>
+<body class="platform-command-center">
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
+    <main class="command-main">
+      <%- include('_platform-page-header', {
+        eyebrow: 'Decision queue',
+        title: 'Approvals',
+        subtitle: 'Decision context is visible here. Approval remains inside the owning module.',
+        action: { label: 'Inspect', href: '/platform/work', enabled: true, reason: '' }
+      }) %>
 
-    <div class="breadcrumb"><a href="/platform">Platform</a> / Approvals</div>
-    <h1 class="page-title">Approvals</h1>
-    <p class="page-subtitle">
-      Everything waiting on a person. Approval itself is granted inside the module, never from this list.
-    </p>
+      <% if (workError) { %>
+        <div class="notice notice-error" data-testid="work-error">Approvals are unavailable. <%= workError %></div>
+      <% } %>
+      <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
 
-    <% if (workError) { %>
-      <div class="notice notice-error" data-testid="work-error">Approvals are unavailable right now. &middot; <%= workError %></div>
-    <% } %>
-    <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
-
-    <% if (items.length === 0) { %>
-      <div class="empty-state" data-testid="approvals-empty">
-        <div>Nothing is waiting for approval.</div>
-      </div>
-    <% } else { %>
-      <div class="batch-list" data-testid="approvals-list">
-        <% items.forEach(function (item) { %>
-          <%- include('_platform-work-row', {
-            item: item,
-            view: platformStatus.presentation(item.state),
-            metaText: item.stateReason,
-            countsText: `${item.counts.awaiting} to review`,
-            // Internal work is listed so the count is honest, but it is never
-            // offered as something to open: its approver is not this customer.
-            chipLabel: item.actionable ? 'Open to review' : 'Internal approval'
-          }) %>
-        <% }); %>
-      </div>
-    <% } %>
-
-    <p class="footer-note">
-      Nothing is scheduled until a human accepts each item inside the module.
-    </p>
+      <% if (items.length === 0) { %>
+        <div class="command-section command-empty approval-empty" data-testid="approvals-empty">Nothing is waiting for approval.</div>
+      <% } else { %>
+        <div class="decision-grid" data-testid="approvals-list">
+          <% items.forEach(function (item) { %>
+            <article class="decision-card" data-work="<%= item.workId %>" data-surface="<%= item.surface %>">
+              <div class="decision-card-head">
+                <div>
+                  <span class="command-eyebrow"><%= item.moduleName %></span>
+                  <h2><%= item.title %></h2>
+                </div>
+                <span class="chip chip-attention"><%= item.actionable ? 'Customer decision' : 'Internal decision' %></span>
+              </div>
+              <dl class="decision-fields">
+                <div><dt>Requested action</dt><dd>Review prepared work</dd></div>
+                <div><dt>Scope</dt><dd><%= item.counts.awaiting %> waiting of <%= item.counts.total %> items</dd></div>
+                <div><dt>Risk</dt><dd>Not measured</dd></div>
+                <div><dt>Reversibility</dt><dd>Unavailable</dd></div>
+                <div><dt>Evidence</dt><dd><%= item.evidenceState %></dd></div>
+              </dl>
+              <p class="decision-reason"><%= item.stateReason %></p>
+              <% if (item.nextAction.enabled) { %>
+                <a class="command-action" href="<%= item.nextAction.href %>">Open</a>
+              <% } else { %>
+                <span class="command-action command-action-disabled" aria-disabled="true" title="<%= item.nextAction.reason %>">Inspect</span>
+              <% } %>
+            </article>
+          <% }); %>
+        </div>
+      <% } %>
+      <p class="footer-note">No approval, scheduling, upload, or publication action exists on this page.</p>
+    </main>
   </div>
 </body>
 </html>
