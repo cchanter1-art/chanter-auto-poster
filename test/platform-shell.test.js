@@ -121,6 +121,14 @@ test('AutoPoster batch statuses project onto canonical platform states', () => {
   assert.equal(byId['batch-failed-0003'].state, WORK_STATE.FAILED);
   assert.equal(byId['batch-donee-0004'].state, WORK_STATE.COMPLETED);
   assert.equal(byId['batch-empty-0005'].state, WORK_STATE.IDLE);
+  const cancelled = platformStatus.projectAutoPosterBatch({
+    batchId: 'batch-cancelled',
+    status: 'cancelled',
+    itemCount: 1,
+    acceptedCount: 0
+  });
+  assert.equal(cancelled.state, WORK_STATE.PAUSED);
+  assert.match(cancelled.stateReason, /before provider dispatch/i);
 });
 
 test('attention_required without a failed preparation still waits on a human', () => {

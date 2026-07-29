@@ -179,7 +179,8 @@ function createBatchService(dependencies = {}) {
     const preparation = post.preparation || null;
     const prepStatus = preparation ? preparation.status : 'pending';
     let itemState;
-    if (post.approved) itemState = 'accepted';
+    if (post.status === 'cancelled') itemState = 'cancelled';
+    else if (post.approved) itemState = 'accepted';
     else if (prepStatus === 'pending' || prepStatus === 'running') itemState = 'preparing';
     else if (prepStatus === 'failed' && problems.includes('missing_caption')) itemState = 'needs_attention';
     else if (problems.filter((problem) => !['schedule_in_past'].includes(problem)).length > 0) itemState = 'needs_attention';
@@ -204,12 +205,14 @@ function createBatchService(dependencies = {}) {
       needsAttention: items.filter((item) => item.itemState === 'needs_attention').length,
       ready: items.filter((item) => item.itemState === 'ready').length,
       accepted: items.filter((item) => item.itemState === 'accepted').length,
+      cancelled: items.filter((item) => item.itemState === 'cancelled').length,
       preparedOk: items.filter((item) => item.preparation && item.preparation.status === 'succeeded').length,
       prepareFailed: items.filter((item) => item.preparation && item.preparation.status === 'failed').length
     };
     let status;
     if (total === 0) status = 'empty';
     else if (counts.preparing > 0) status = 'preparing';
+    else if (counts.cancelled === total) status = 'cancelled';
     else if (counts.accepted === total) status = 'completed';
     else if (counts.needsAttention > 0) status = 'attention_required';
     else status = 'ready';
