@@ -4,90 +4,128 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>System health — CHANTER Platform</title>
+  <title>System Health — CHANTER Platform</title>
   <link rel="stylesheet" href="/platform/platform.css">
 </head>
-<body>
+<body class="platform-command-center">
   <div class="shell">
     <%- include('_platform-nav', { active: locals.active || '' }) %>
+    <main class="command-main">
+      <%- include('_platform-page-header', {
+        eyebrow: 'Measured readiness',
+        title: 'System Health',
+        subtitle: 'Available signals are explicit. Unmeasured state stays unavailable.',
+        action: { label: 'Inspect', href: '/platform/work', enabled: true, reason: '' }
+      }) %>
 
-    <div class="breadcrumb"><a href="/platform">Platform</a> / System health</div>
-    <h1 class="page-title">System health</h1>
-    <p class="page-subtitle">
-      One measured storage signal and one fixed approval guarantee. Anything unmeasured is reported as unknown.
-    </p>
+      <section class="health-summary command-section" data-testid="health-summary">
+        <div>
+          <span class="command-eyebrow">Overall</span>
+          <h2><%= commandCenter.systemState.label %></h2>
+          <p><%= commandCenter.systemState.reason %></p>
+        </div>
+        <span class="chip <%= commandCenter.systemState.chip %>"><%= commandCenter.systemState.label %></span>
+      </section>
 
-    <div class="health-grid" data-testid="health-grid">
-      <div class="panel health-card" data-health="storage">
-        <div class="health-head">
-          <div class="health-name">Storage</div>
-          <span class="chip <%= health.storage.reachable === true ? 'chip-ready' : (health.storage.reachable === false ? 'chip-failed' : 'chip-neutral') %>">
-            <%= health.storage.reachable === true ? 'Reachable' : (health.storage.reachable === false ? 'Unreachable' : 'Unknown') %>
-          </span>
-        </div>
-        <div class="health-detail">Provider: <%= health.storage.provider %> &middot; mode: <%= health.storage.mode %></div>
-      </div>
-
-      <div class="panel health-card" data-health="approval">
-        <div class="health-head">
-          <div class="health-name">Approval</div>
-          <span class="chip chip-ready">Approval required</span>
-        </div>
-        <div class="health-detail">Nothing is scheduled without human approval.</div>
-      </div>
-
-      <div class="panel health-card" data-health="modules">
-        <div class="health-head">
-          <div class="health-name">Modules</div>
-          <span class="chip chip-neutral"><%= customerModuleCount %> + <%= internalModuleCount %></span>
-        </div>
-        <div class="health-detail"><%= customerModuleCount %> active for you, <%= internalModuleCount %> internal.</div>
-      </div>
-
-      <div class="panel health-card" data-health="work">
-        <div class="health-head">
-          <div class="health-name">Work</div>
-          <span class="chip <%= workError ? 'chip-failed' : 'chip-neutral' %>"><%= workError ? 'Unknown' : workSummary.total %></span>
-        </div>
-        <div class="health-detail">
-          <% if (workError) { %>
-            Work could not be read.
-          <% } else { %>
-            <%= workSummary.running %> running, <%= workSummary.awaitingApproval %> waiting for approval, <%= workSummary.failed %> failed.
-          <% } %>
-        </div>
-        <% if (workError) { %><div class="health-detail-en"><%= workError %></div><% } %>
-        <%
-        // A partial read is reported as a partial read. The count above stays
-        // truthful about what was read; this line names what was not, so a
-        // module outage can never hide behind a healthy-looking total.
-        const degradedProviders = locals.workDegraded || [];
-        %>
-        <% if (!workError && degradedProviders.length > 0) { %>
-          <div class="health-detail-en" data-testid="health-work-degraded">
-            Partial: <% degradedProviders.forEach(function (entry, index) { %><%= index > 0 ? ', ' : '' %><%= entry.moduleName %><% }); %> could not be read.
+      <div class="health-grid command-health-grid" data-testid="health-grid">
+        <article class="panel health-card" data-health="application">
+          <div class="health-head">
+            <div class="health-name">Application</div>
+            <span class="chip chip-ready"><%= commandCenter.health.application.status %></span>
           </div>
-        <% } %>
+          <div class="health-detail">This authenticated Platform response is available.</div>
+        </article>
+
+        <article class="panel health-card" data-health="runtime-control">
+          <div class="health-head">
+            <div class="health-name">Runtime control</div>
+            <span class="chip <%= commandCenter.health.runtimeControl.configured ? 'chip-ready' : 'chip-neutral' %>"><%= commandCenter.health.runtimeControl.status %></span>
+          </div>
+          <div class="health-detail">Authenticated control authority is <%= commandCenter.health.runtimeControl.configured ? 'configured' : 'unavailable' %>.</div>
+        </article>
+
+        <article class="panel health-card" data-health="storage">
+          <div class="health-head">
+            <div class="health-name">Storage</div>
+            <span class="chip <%= commandCenter.health.storage.reachable === true ? 'chip-ready' : (commandCenter.health.storage.reachable === false ? 'chip-failed' : 'chip-neutral') %>">
+              <%= commandCenter.health.storage.reachable === true ? 'Reachable' : (commandCenter.health.storage.reachable === false ? 'Unreachable' : 'Unavailable') %>
+            </span>
+          </div>
+          <div class="health-detail">Provider: <%= commandCenter.health.storage.provider %> · mode: <%= commandCenter.health.storage.mode %></div>
+        </article>
+
+        <article class="panel health-card" data-health="scheduler">
+          <div class="health-head">
+            <div class="health-name">Scheduler</div>
+            <span class="chip chip-neutral"><%= commandCenter.health.scheduler.inMemoryTimer ? 'In process' : 'External only' %></span>
+          </div>
+          <div class="health-detail">Mode: <%= commandCenter.health.scheduler.mode %> · last tick: <%= commandCenter.health.scheduler.lastTickAt || 'Unavailable' %></div>
+        </article>
+
+        <article class="panel health-card" data-health="canonical-execution">
+          <div class="health-head">
+            <div class="health-name">Canonical execution</div>
+            <span class="chip <%= commandCenter.health.canonicalExecution.enabled ? 'chip-attention' : 'chip-neutral' %>"><%= commandCenter.health.canonicalExecution.status %></span>
+          </div>
+          <div class="health-detail">Default Composer path: <%= commandCenter.health.canonicalExecution.defaultComposerPath ? 'Active' : 'Inactive' %></div>
+        </article>
+
+        <article class="panel health-card" data-health="connections">
+          <div class="health-head">
+            <div class="health-name">Connected channels</div>
+            <span class="chip <%= commandCenter.health.connections.error ? 'chip-neutral' : 'chip-ready' %>"><%= commandCenter.health.connections.error ? 'Unavailable' : commandCenter.health.connections.connectedCount %></span>
+          </div>
+          <div class="health-detail">
+            <% if (commandCenter.health.connections.error) { %>
+              <%= commandCenter.health.connections.error %>
+            <% } else { %>
+              <%= commandCenter.health.connections.publishingReadyCount %> publishing-ready.
+            <% } %>
+          </div>
+        </article>
+
+        <article class="panel health-card" data-health="providers">
+          <div class="health-head">
+            <div class="health-name">Providers</div>
+            <span class="chip chip-neutral"><%= commandCenter.health.providers.filter(function (provider) { return provider.available; }).length %> available</span>
+          </div>
+          <ul class="health-status-list">
+            <% commandCenter.health.providers.forEach(function (provider) { %>
+              <li><span><%= provider.name %></span><strong><%= provider.status %></strong></li>
+            <% }); %>
+          </ul>
+        </article>
+
+        <article class="panel health-card" data-health="work">
+          <div class="health-head">
+            <div class="health-name">Work sources</div>
+            <span class="chip <%= workError ? 'chip-failed' : ((locals.workDegraded || []).length ? 'chip-attention' : 'chip-ready') %>">
+              <%= workError ? 'Unavailable' : `${workProviderCount - (locals.workDegraded || []).length} of ${workProviderCount}` %>
+            </span>
+          </div>
+          <div class="health-detail"<%- !workError && (locals.workDegraded || []).length ? ' data-testid="health-work-degraded"' : '' %>>
+            <% if (workError) { %>
+              <%= workError %>
+            <% } else if ((locals.workDegraded || []).length) { %>
+              Partial read. <%= workProviderCount - (locals.workDegraded || []).length %> of <%= workProviderCount %> registered work sources answered. <%= (locals.workDegraded || []).map(function (entry) { return entry.moduleName; }).join(', ') %> unavailable.
+            <% } else { %>
+              <%= workProviderCount %> of <%= workProviderCount %> registered work sources answered.
+            <% } %>
+          </div>
+        </article>
+
+        <article class="panel health-card" data-health="approval">
+          <div class="health-head">
+            <div class="health-name">Approval authority</div>
+            <span class="chip chip-ready">Required</span>
+          </div>
+          <div class="health-detail">Approval stays inside the owning customer module.</div>
+        </article>
       </div>
 
-      <div class="panel health-card" data-health="providers">
-        <div class="health-head">
-          <div class="health-name">Work sources</div>
-          <span class="chip <%= (locals.workDegraded || []).length > 0 || workError ? 'chip-attention' : 'chip-neutral' %>"><%= locals.workProviderCount || 0 %></span>
-        </div>
-        <div class="health-detail">
-          <%= (locals.workProviderCount || 0) - (locals.workDegraded || []).length %> of <%= locals.workProviderCount || 0 %> registered modules answered.
-        </div>
-      </div>
-    </div>
-
-    <p class="section-note" style="margin-top:18px" data-testid="health-observed-at">
-      Observed at <%= health.observedAt %>
-    </p>
-
-    <p class="footer-note">
-      Runtime readiness, workers and deployment status are tracked internally in Operator and are not claimed here.
-    </p>
+      <p class="section-note health-observed" data-testid="health-observed-at">Observed at <%= commandCenter.health.observedAt || 'Unavailable' %></p>
+      <p class="footer-note">No worker, deployment, provider, or internal Operator control is exposed here.</p>
+    </main>
   </div>
 </body>
 </html>

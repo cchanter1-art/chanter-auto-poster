@@ -22,6 +22,7 @@ const express = require('express');
 const platformModules = require('../src/platformModules');
 const platformStatus = require('../src/platformStatus');
 const batchService = require('../src/batchService');
+batchService.listDestinations = async () => ({ destinations: [] });
 
 // Auth is destructured inside platformRoutes at require time, so the session
 // gate must be replaced before that require — every route under test still
@@ -226,17 +227,16 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
     pages[path] = await response.text();
   }
 
-  // 1. Operational shell navigation remains consistent off the minimal home.
-  for (const [path, html] of Object.entries(pages).filter(([path]) => path !== '/platform')) {
+  // 1. Operational shell navigation remains consistent on all six surfaces.
+  for (const [path, html] of Object.entries(pages)) {
     for (const navId of ['overview', 'modules', 'work', 'approvals', 'evidence', 'health']) {
       assert.ok(html.includes(`data-nav="${navId}"`), `${path} is missing nav item ${navId}`);
     }
   }
 
-  // 2. The minimal home has no operational nav; every other surface marks
-  //    itself active exactly once.
-  assert.doesNotMatch(pages['/platform'], /<nav class="platform-nav/);
+  // 2. Every surface marks itself active exactly once.
   const activeById = {
+    '/platform': 'overview',
     '/platform/modules': 'modules',
     '/platform/work': 'work',
     '/platform/approvals': 'approvals',
@@ -252,10 +252,12 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   // 3. The platform is visibly broader than AutoPoster, and AutoPoster is a
   //    module inside it rather than the shell itself.
   assert.ok(pages['/platform'].includes('data-module="autoposter"'));
-  assert.ok(pages['/platform'].includes('href="/platform/autoposter/compose"'));
-  assert.ok(pages['/platform'].includes('href="/platform/autoposter/activity"'));
-  assert.ok(pages['/platform'].includes('href="/platform/autoposter/accounts"'));
-  assert.ok(!pages['/platform'].includes('data-testid="overview-summary"'));
+  assert.ok(pages['/platform'].includes('href="/platform/autoposter"'));
+  for (const section of ['overview-system-state', 'overview-attention', 'overview-active-work', 'overview-modules', 'overview-evidence', 'value-ribbon']) {
+    assert.ok(pages['/platform'].includes(`data-testid="${section}"`));
+  }
+  assert.ok(pages['/platform'].includes('Time to verified outcome'));
+  assert.ok(pages['/platform'].includes('Not measured'));
   assert.ok(pages['/platform/modules'].includes('data-module="operator"'));
   assert.ok(pages['/platform/modules'].includes('data-module="agent-runtime"'));
   assert.ok(pages['/platform'].includes('CHANTER Platform'));
@@ -287,18 +289,20 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   assert.ok(!pages['/platform/approvals'].includes('data-work="batch-donee-0004"'));
   assert.ok(pages['/platform/approvals'].includes('/platform/autoposter/compose/batch-waiting-0002'));
 
-  // 8. Evidence indexes every work record with its prepared/failed/accepted tally.
+  // 8. Evidence indexes every durable work record and names unmeasured verification.
   for (const record of BATCH_RECORDS) {
     assert.ok(pages['/platform/evidence'].includes(`data-work="${record.batchId}"`));
   }
+  assert.ok(pages['/platform/evidence'].includes('<dt>Verification</dt><dd>Not measured</dd>'));
 
-  // 9. Health reports the unconfigured storage probe honestly as unknown
+  // 9. Health reports the unconfigured storage probe honestly as unavailable
   //    rather than as healthy, and states the approval guarantee.
   const storageCard = healthCard(pages['/platform/health'], 'storage');
-  assert.ok(storageCard.includes('Unknown'));
+  assert.ok(storageCard.includes('Unavailable'));
   assert.ok(!storageCard.includes('Reachable'), 'an unconfigured probe must not read as reachable');
   assert.ok(pages['/platform/health'].includes('data-health="approval"'));
-  assert.ok(pages['/platform/health'].includes('Approval required'));
+  assert.ok(pages['/platform/health'].includes('Approval authority'));
+  assert.ok(pages['/platform/health'].includes('Required'));
 });
 
 test('the platform shell and customer composer are English-only', async (t) => {
@@ -407,8 +411,8 @@ test('an unreachable store degrades the shell instead of breaking or faking it',
 
   const healthPage = await (await fetch(`${baseUrl}/platform/health`)).text();
   const workCard = healthCard(healthPage, 'work');
-  assert.ok(workCard.includes('Unknown'), 'unreadable work must not render as zero healthy work');
-  assert.ok(workCard.includes('Work could not be read.'));
+  assert.ok(workCard.includes('Unavailable'), 'unreadable work must not render as zero healthy work');
+  assert.ok(workCard.includes('storage offline for test'));
 
   const workApi = await (await fetch(`${baseUrl}/api/platform/work`)).json();
   assert.equal(workApi.ok, false);

@@ -11,13 +11,24 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
-test('Platform home is general, minimal, and exposes only real customer destinations', () => {
+test('Platform overview is one read-only command center over existing truth', () => {
   const home = read('src/views/platform.ejs');
-  assert.match(home, /<h1>CHANTER<\/h1>/);
-  assert.match(home, /href="\/platform\/autoposter\/compose"[^>]*data-module="<%= autoPosterModule\.id %>"/);
-  assert.match(home, /href="\/platform\/autoposter\/activity">Activity<\/a>/);
-  assert.match(home, /href="\/platform\/autoposter\/accounts">Account<\/a>/);
-  for (const forbidden of ['overview-summary', 'stat-grid', 'provider', 'plan', 'Coming soon']) {
+  for (const surface of [
+    'overview-system-state',
+    'overview-attention',
+    'overview-active-work',
+    'overview-modules',
+    'overview-evidence',
+    'value-ribbon'
+  ]) {
+    assert.match(home, new RegExp(`data-testid="${surface}"`));
+  }
+  assert.match(home, /commandCenter\.valueRibbon\.fields/);
+  const projection = read('src/platformCommandCenter.js');
+  for (const field of ['Objective', 'Time to verified outcome', 'Human attention', 'Risk', 'Evidence coverage', 'Verified value state']) {
+    assert.match(projection, new RegExp(field));
+  }
+  for (const forbidden of ['<form', '<button', 'accept-all', 'createBatch', 'Coming soon']) {
     assert.doesNotMatch(home, new RegExp(forbidden, 'i'));
   }
 });
@@ -61,4 +72,11 @@ test('clean Composer and Accounts surfaces use canonical module destinations', (
   assert.match(accounts, /Current Account/);
   assert.match(accounts, /href="\/platform\/autoposter\/compose">Done<\/a>/);
   assert.match(accounts, /name="returnTo" value="\/platform\/autoposter\/accounts"/);
+});
+
+test('evidence filtering has an explicit rendered hidden state', () => {
+  const evidence = read('src/views/platform-evidence.ejs');
+  const css = read('public/platform/platform.css');
+  assert.match(evidence, /row\.hidden = !matches/);
+  assert.match(css, /\.evidence-ledger-row\[hidden\][\s\S]*display:\s*none/);
 });

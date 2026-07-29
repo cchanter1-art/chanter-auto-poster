@@ -26,6 +26,7 @@ const platformWorkProviders = require('../src/platformWorkProviders');
 const platformOperatorProvider = require('../src/platformOperatorProvider');
 const { createAutoPosterWorkProvider } = require('../src/platformAutoPosterProvider');
 const batchService = require('../src/batchService');
+batchService.listDestinations = async () => ({ destinations: [] });
 
 const auth = require('../src/auth');
 auth.requireAdminPage = (req, res, next) => next();
@@ -822,8 +823,9 @@ test('the shell renders mixed-module work with no module-specific branching', as
   const approvals = await (await fetch(`${baseUrl}/platform/approvals`)).text();
   assert.ok(approvals.includes('data-work="batch-waiting-0002"'));
   assert.ok(approvals.includes('data-work="graph-approval-required-01"'));
-  assert.ok(approvals.includes('Open to review'));
-  assert.ok(approvals.includes('Internal approval'));
+  assert.ok(approvals.includes('Customer decision'));
+  assert.ok(approvals.includes('Internal decision'));
+  assert.match(approvals, /href="\/platform\/autoposter\/compose\/batch-waiting-0002"[^>]*>Open<\/a>/);
   assert.equal(approvals.includes('data-work="batch-donee-0004"'), false);
 
   // 5. Evidence indexes both modules.
@@ -844,7 +846,7 @@ test('the shell renders mixed-module work with no module-specific branching', as
   // 7. Overview and System health count the same mixed total.
   const health = await (await fetch(`${baseUrl}/platform/health`)).text();
   assert.ok(health.includes('data-health="providers"'));
-  assert.ok(health.includes('3 of 3 registered modules answered.'));
+  assert.ok(health.includes('3 of 3 registered work sources answered.'));
 });
 
 test('a dead Operator degrades only itself while AutoPoster work still renders', async (t) => {
@@ -883,7 +885,7 @@ test('a dead Operator degrades only itself while AutoPoster work still renders',
 
   const health = await (await fetch(`${baseUrl}/platform/health`)).text();
   assert.ok(health.includes('data-testid="health-work-degraded"'));
-  assert.ok(health.includes('2 of 3 registered modules answered.'));
+  assert.ok(health.includes('2 of 3 registered work sources answered.'));
 
   const api = await (await fetch(`${baseUrl}/api/platform/work`)).json();
   assert.equal(api.ok, true, 'a partial read is still a successful read');
