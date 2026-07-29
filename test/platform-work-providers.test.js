@@ -171,9 +171,10 @@ test('the aggregation layer has no direct dependency on any module service', () 
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'platformWorkProviders.js'), 'utf8');
   assert.equal(/batchService/.test(source), false, 'the registry must not know batchService exists');
   assert.equal(/listBatches/.test(source), false, 'the registry must not know how AutoPoster stores work');
-  // The only platform modules it may know are the registry and the vocabulary.
+  // The only shared platform modules it may know are ownership, state, and
+  // the pure mission-value contract validator.
   const required = Array.from(source.matchAll(/require\('\.\/([a-zA-Z]+)'\)/g)).map((match) => match[1]);
-  assert.deepEqual(required.sort(), ['platformModules', 'platformStatus']);
+  assert.deepEqual(required.sort(), ['missionValue', 'platformModules', 'platformStatus']);
 });
 
 // ── Canonical state mapping for the second module ──────────────────────────
@@ -970,4 +971,65 @@ test('with no Operator configured the platform registers AutoPoster alone', asyn
   assert.deepEqual(api.degraded, [], 'unconfigured is not an outage');
   assert.equal(api.ok, true);
   assert.equal(api.summary.total, 2);
+});
+
+test('the work projection boundary rejects a malformed mission value contract', async () => {
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register({
+    moduleId: 'autoposter',
+    listWork: async () => [{
+      workId: 'malformed-value-contract',
+      state: WORK_STATE.RUNNING,
+      missionValueContract: {
+        schema: 'chanter.mission-value-contract.v1',
+        budgets: { humanAttentionMinutes: -5 }
+      }
+    }]
+  });
+
+  const collected = await registry.collect({});
+  assert.equal(collected.items.length, 0);
+  assert.equal(collected.degraded.length, 1);
+  assert.match(collected.error, /Invalid mission value contract/);
+  assert.match(collected.error, /humanAttentionMinutes/);
+});
+
+test('value metadata preserves source ownership and cannot create customer-safe internal actions', async () => {
+  const contract = {
+    schema: 'chanter.mission-value-contract.v1',
+    objective: {
+      statement: 'Verify the same declared objective.',
+      acceptanceCriteria: ['Criterion is verified.']
+    }
+  };
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register({
+    moduleId: 'autoposter',
+    listWork: async () => [{
+      workId: 'customer-value-work',
+      state: WORK_STATE.RUNNING,
+      href: '/platform/autoposter/compose/customer-value-work',
+      missionValueContract: contract
+    }]
+  });
+  registry.register({
+    moduleId: 'operator',
+    listWork: async () => [{
+      workId: 'internal-value-work',
+      state: WORK_STATE.RUNNING,
+      href: '/platform/autoposter/compose/forged-internal-action',
+      missionValueContract: contract
+    }]
+  });
+
+  const collected = await registry.collect({});
+  const customer = collected.items.find((item) => item.workId === 'customer-value-work');
+  const internal = collected.items.find((item) => item.workId === 'internal-value-work');
+
+  assert.equal(customer.actionable, true);
+  assert.equal(customer.href, '/platform/autoposter/compose/customer-value-work');
+  assert.equal(internal.actionable, false);
+  assert.equal(internal.href, '');
+  assert.equal(internal.surface, platformModules.SURFACE_INTERNAL);
+  assert.equal(internal.missionValueContract.objective.statement, contract.objective.statement);
 });

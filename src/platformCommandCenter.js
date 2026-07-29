@@ -2,6 +2,7 @@
 
 const platformModules = require('./platformModules');
 const platformStatus = require('./platformStatus');
+const missionValue = require('./missionValue');
 
 const SYSTEM_STATE = Object.freeze({
   HEALTHY: 'healthy',
@@ -71,15 +72,50 @@ function actionFor(item, intent = 'inspect') {
   return { label, href, enabled: true, reason: '' };
 }
 
+function evidenceAnchorFor(workId) {
+  const encoded = Buffer.from(String(workId || ''), 'utf8').toString('base64url');
+  return `mission-value-evidence-${encoded || 'unidentified'}`;
+}
+
 function decorateWork(items = []) {
-  return items.map((item) => ({
-    ...item,
-    updatedLabel: timestampOf(item) || 'Unavailable',
-    evidenceState: item.evidenceUnavailable
-      ? 'Unavailable'
-      : (item.evidenceAvailable ? 'Available' : 'Not measured'),
-    nextAction: actionFor(item)
-  }));
+  return items.map((item) => {
+    const valueEvaluation = missionValue.evaluateMissionValue({
+      work: item,
+      contract: item.missionValueContract,
+      evidence: item.missionValueEvidence
+    });
+    const evidenceAnchor = evidenceAnchorFor(item.workId);
+    const verification = valueEvaluation.dimensions[missionValue.DIMENSION.VERIFICATION_STATE];
+    return {
+      ...item,
+      updatedLabel: timestampOf(item) || 'Unavailable',
+      evidenceState: item.evidenceUnavailable
+        ? 'Unavailable'
+        : (item.evidenceAvailable ? 'Available' : 'Not measured'),
+      nextAction: actionFor(item),
+      valueEvaluation,
+      valueState: valueEvaluation.readinessPresentation.label,
+      valueStateChip: valueEvaluation.readinessPresentation.chip,
+      missingMeasurementsCount: valueEvaluation.missingMeasurements.length,
+      valueObjective: valueEvaluation.contractDeclared
+        ? missionValue.displayValue(
+          missionValue.DIMENSION.OBJECTIVE_CLARITY,
+          valueEvaluation.dimensions[missionValue.DIMENSION.OBJECTIVE_CLARITY]
+        )
+        : 'Not declared',
+      valueVerification: missionValue.displayValue(
+        missionValue.DIMENSION.VERIFICATION_STATE,
+        verification
+      ),
+      valueReadinessChangeLabel: valueEvaluation.readinessChange.changed
+        ? `Yes - ${missionValue.presentation(valueEvaluation.readinessChange.from).label} to ${missionValue.presentation(valueEvaluation.readinessChange.to).label}`
+        : 'No',
+      evidenceAnchor,
+      valueEvidenceHref: item.evidenceAvailable
+        ? `/platform/evidence#${evidenceAnchor}`
+        : ''
+    };
+  });
 }
 
 function groupWork(items = []) {
@@ -248,51 +284,51 @@ function moduleCards(modules, work) {
   });
 }
 
-function buildValueRibbon({ work, evidenceItems, activeWork }) {
-  const objective = activeWork[0] || null;
+function buildValueRibbon({ work, activeWork }) {
+  const focus = activeWork.find((item) => item.valueEvaluation.contractDeclared)
+    || work.items.find((item) => item.valueEvaluation.contractDeclared)
+    || activeWork[0]
+    || work.items[0]
+    || null;
+  const evaluation = focus
+    ? focus.valueEvaluation
+    : missionValue.evaluateMissionValue();
+  function field(id, dimensionId, href) {
+    const value = evaluation.dimensions[dimensionId];
+    return {
+      id,
+      label: missionValue.DIMENSION_LABEL[dimensionId],
+      value: missionValue.displayValue(dimensionId, value),
+      provenance: missionValue.provenanceLabel(value),
+      provenanceState: value.state,
+      href
+    };
+  }
   return {
     fields: [
-      {
-        id: 'objective',
-        label: 'Objective',
-        value: objective ? objective.title : 'Unavailable',
-        href: objective && objective.actionable && objective.href ? objective.href : '/platform/work'
-      },
-      {
-        id: 'time',
-        label: 'Time to verified outcome',
-        value: 'Not measured',
-        href: '/platform/evidence'
-      },
-      {
-        id: 'attention',
-        label: 'Human attention',
-        value: `${work.summary.awaitingApproval} waiting`,
-        href: '/platform/approvals'
-      },
-      {
-        id: 'risk',
-        label: 'Risk',
-        value: work.summary.failed > 0 ? `${work.summary.failed} failed work item${work.summary.failed === 1 ? '' : 's'}` : 'Not measured',
-        href: '/platform/work'
-      },
-      {
-        id: 'evidence',
-        label: 'Evidence coverage',
-        value: work.summary.total > 0
-          ? `${evidenceItems.length} of ${work.summary.total} work items`
-          : 'Unavailable',
-        href: '/platform/evidence'
-      },
-      {
-        id: 'verified-value',
-        label: 'Verified value state',
-        value: 'Not measured',
-        href: '/platform/evidence'
-      }
+      field('objective', missionValue.DIMENSION.OBJECTIVE_CLARITY, '/platform/work'),
+      field('acceptance', missionValue.DIMENSION.ACCEPTANCE_COVERAGE, '/platform/evidence'),
+      field('time', missionValue.DIMENSION.TIME_TO_VERIFIED_OUTCOME, '/platform/evidence'),
+      field('timeliness', missionValue.DIMENSION.TIMELINESS, '/platform/evidence'),
+      field('attention', missionValue.DIMENSION.HUMAN_ATTENTION, '/platform/approvals'),
+      field('cost', missionValue.DIMENSION.COST, '/platform/evidence'),
+      field('risk', missionValue.DIMENSION.RISK, '/platform/work'),
+      field('evidence', missionValue.DIMENSION.EVIDENCE_COVERAGE, '/platform/evidence'),
+      field('verification', missionValue.DIMENSION.VERIFICATION_STATE, '/platform/evidence'),
+      field('verified-value', missionValue.DIMENSION.VERIFIED_VALUE_STATE, '/platform/evidence')
     ],
-    equation: 'V = (O * E) / (T * H * R)',
-    equationNote: 'No value score is calculated until objective, evidence, time, human attention, and risk are all measured.'
+    focusWorkId: focus ? focus.workId : '',
+    focusTitle: focus ? focus.title : 'No mission selected',
+    equation: 'No scalar score',
+    canonicalEquation: 'Real AI Value = (Correct Objective x Capability x Controlled Execution x Verification x Learning x Timeliness) / (Cost x Risk x Friction x Time to Verified Outcome x Human Attention)',
+    equationNote: 'Verified value requires every declared acceptance criterion to have exact linked verified evidence. Missing sources remain Not measured or Unavailable.',
+    provenanceStates: [
+      ['Measured', 'An actual existing source provides the fact.'],
+      ['Declared', 'The mission value contract provides the fact.'],
+      ['Inferred', 'Existing named facts deterministically produce the state.'],
+      ['Unavailable', 'No source exists.'],
+      ['Not applicable', 'A precise condition makes the dimension inapplicable.']
+    ]
   };
 }
 
@@ -332,7 +368,10 @@ function buildCommandCenter({
     providerStatuses
   });
   const systemState = systemStateOf({ attention, work: normalizedWork, health: safeHealth });
-  const evidenceItems = newest(normalizedWork.items.filter((item) => item.evidenceAvailable));
+  const evidenceItems = newest(normalizedWork.items.filter((item) => (
+    item.evidenceAvailable || item.valueEvaluation.contractDeclared
+  )));
+  const durableEvidenceItems = evidenceItems.filter((item) => item.evidenceAvailable);
   const activeWork = normalizedWork.items.filter((item) => ![
     platformStatus.WORK_STATE.COMPLETED,
     platformStatus.WORK_STATE.IDLE
@@ -354,8 +393,8 @@ function buildCommandCenter({
     activeWork: activeWork.slice(0, 5),
     modules: moduleCards(modules, normalizedWork),
     evidenceItems,
-    recentEvidence: evidenceItems.slice(0, 4),
-    valueRibbon: buildValueRibbon({ work: normalizedWork, evidenceItems, activeWork }),
+    recentEvidence: durableEvidenceItems.slice(0, 4),
+    valueRibbon: buildValueRibbon({ work: normalizedWork, activeWork }),
     health: {
       application: { status: 'Available', measured: true },
       storage: safeHealth.storage,

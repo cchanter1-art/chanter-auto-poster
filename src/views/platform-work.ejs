@@ -49,6 +49,23 @@
                     countsText: `${item.counts.accepted}/${item.counts.total} approved`,
                     chipLabel: view.label
                   }) %>
+                  <div
+                    class="work-value-summary"
+                    data-value-work="<%= item.workId %>"
+                    data-value-state="<%= item.valueEvaluation.readiness %>"
+                  >
+                    <dl>
+                      <div><dt>Value state</dt><dd><span class="chip <%= item.valueStateChip %>"><%= item.valueState %></span></dd></div>
+                      <div><dt>Missing measurements</dt><dd><%= item.missingMeasurementsCount %></dd></div>
+                      <div><dt>Objective</dt><dd><%= item.valueObjective %></dd></div>
+                      <div><dt>Verification</dt><dd><%= item.valueVerification %></dd></div>
+                    </dl>
+                    <% if (item.valueEvidenceHref) { %>
+                      <a class="text-action" href="<%= item.valueEvidenceHref %>">View linked evidence</a>
+                    <% } else { %>
+                      <span class="value-evidence-unavailable">Linked evidence unavailable</span>
+                    <% } %>
+                  </div>
                 <% }); %>
               </div>
             <% } %>

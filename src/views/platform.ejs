@@ -144,19 +144,31 @@
         <div class="value-ribbon-heading">
           <div>
             <span class="command-eyebrow">Read-only CHANTER Value</span>
-            <h2 id="value-title">Measured value state</h2>
+            <h2 id="value-title">Mission value state</h2>
+            <small class="value-focus">Mission: <%= commandCenter.valueRibbon.focusTitle %></small>
           </div>
           <code><%= commandCenter.valueRibbon.equation %></code>
         </div>
         <div class="value-fields">
           <% commandCenter.valueRibbon.fields.forEach(function (field) { %>
-            <a href="<%= field.href %>" class="value-field">
+            <a href="<%= field.href %>" class="value-field" data-value-dimension="<%= field.id %>" data-provenance="<%= field.provenanceState %>">
               <span><%= field.label %></span>
               <strong><%= field.value %></strong>
+              <small><%= field.provenance %></small>
             </a>
           <% }); %>
         </div>
         <p><%= commandCenter.valueRibbon.equationNote %></p>
+        <details class="value-explanation">
+          <summary>How CHANTER evaluates value</summary>
+          <p><%= commandCenter.valueRibbon.canonicalEquation %></p>
+          <dl>
+            <% commandCenter.valueRibbon.provenanceStates.forEach(function (state) { %>
+              <div><dt><%= state[0] %></dt><dd><%= state[1] %></dd></div>
+            <% }); %>
+          </dl>
+          <p>Capability = Intelligence x Tools x Memory x Context. Controlled Execution = Orchestration x Persistence x Recovery x Human Authority.</p>
+        </details>
       </section>
     </main>
   </div>

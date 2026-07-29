@@ -46,12 +46,14 @@
         <div class="evidence-ledger" data-testid="evidence-list">
           <% items.forEach(function (item) { %>
             <article
+              id="<%= item.evidenceAnchor %>"
               class="evidence-ledger-row"
               data-evidence-row
               data-work="<%= item.workId %>"
               data-module="<%= item.moduleId %>"
               data-state="<%= item.state %>"
-              data-search="<%= `${item.title} ${item.moduleName} ${item.state}`.toLowerCase() %>"
+              data-value-state="<%= item.valueEvaluation.readiness %>"
+              data-search="<%= `${item.title} ${item.moduleName} ${item.state} ${item.valueEvaluation.criterionCoverage.map(function (entry) { return entry.criterion; }).join(' ')}`.toLowerCase() %>"
             >
               <div class="evidence-ledger-main">
                 <span class="command-eyebrow"><%= item.moduleName %></span>
@@ -60,10 +62,35 @@
               </div>
               <dl class="evidence-facts">
                 <div><dt>Availability</dt><dd><%= item.evidenceState %></dd></div>
-                <div><dt>Verification</dt><dd>Not measured</dd></div>
+                <div><dt>Verification</dt><dd><%= item.valueVerification %></dd></div>
+                <div><dt>Value state</dt><dd><%= item.valueState %></dd></div>
+                <div><dt>Readiness changed</dt><dd><%= item.valueReadinessChangeLabel %></dd></div>
                 <div><dt>State</dt><dd><%= platformStatus.presentation(item.state).label %></dd></div>
                 <div><dt>Record</dt><dd><%= item.workId %></dd></div>
               </dl>
+              <div class="evidence-criteria" aria-label="Acceptance criterion evidence mapping">
+                <span class="command-eyebrow">Acceptance criteria</span>
+                <% if (item.valueEvaluation.criterionCoverage.length === 0) { %>
+                  <p>Not declared. No criterion mapping is inferred.</p>
+                <% } else { %>
+                  <ul>
+                    <% item.valueEvaluation.criterionCoverage.forEach(function (entry) { %>
+                      <li data-criterion-state="<%= entry.state %>">
+                        <span><%= entry.criterion %></span>
+                        <strong><%=
+                          entry.state === 'verified'
+                            ? 'Verified'
+                            : (entry.state === 'failed'
+                              ? 'Failed'
+                              : (entry.state === 'verification_pending'
+                                ? 'Verification pending'
+                                : 'No linked evidence'))
+                        %></strong>
+                      </li>
+                    <% }); %>
+                  </ul>
+                <% } %>
+              </div>
               <% if (item.nextAction.enabled) { %>
                 <a class="command-action" href="<%= item.nextAction.href %>">View Evidence</a>
               <% } else { %>

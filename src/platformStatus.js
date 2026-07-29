@@ -40,6 +40,24 @@ function presentation(state) {
   return WORK_STATE_PRESENTATION[state] || WORK_STATE_PRESENTATION[WORK_STATE.IDLE];
 }
 
+// Optional mission-value facts remain owned by the source work record. This is
+// only a pass-through into the shared work projection: no value metadata is
+// persisted here and absence is the normal state. The work registry validates
+// the contract before any command-center surface can consume it.
+function missionValueMetadata(record = {}) {
+  const metadata = {};
+  for (const key of [
+    'missionValueContract',
+    'missionValueEvidence',
+    'startedAt',
+    'completedAt',
+    'retainedLessons'
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) metadata[key] = record[key];
+  }
+  return metadata;
+}
+
 // AutoPoster's durable batch vocabulary (batchService.deriveBatchStatus, mirrored
 // onto the batch record by refreshBatchRecord) is:
 //   empty | preparing | ready | attention_required | completed
@@ -95,7 +113,8 @@ function projectAutoPosterBatch(record = {}) {
     // was ever added to it.
     evidenceAvailable: true,
     videoCount: Number(record.videoCount || 0),
-    destinationCount: Number(record.destinationCount || 0)
+    destinationCount: Number(record.destinationCount || 0),
+    ...missionValueMetadata(record)
   };
 }
 
@@ -156,7 +175,8 @@ function projectAutoPosterRuntimeJob(record = {}) {
     evidenceBundleId: String(record.evidenceBundleId || ''),
     scheduledAt: String(record.scheduledAt || ''),
     destinationCount: 1,
-    videoCount: 1
+    videoCount: 1,
+    ...missionValueMetadata(record)
   };
 }
 
@@ -220,7 +240,8 @@ function projectRecurringSeries(series = {}) {
       lastReleaseAt: String(series.lastReleaseAt || '')
     },
     videoCount: Number(series.sourceCount || 0),
-    destinationCount: Number(series.destinationCount || 0)
+    destinationCount: Number(series.destinationCount || 0),
+    ...missionValueMetadata(series)
   };
 }
 
@@ -286,7 +307,8 @@ function projectOperatorMissionGraph(record = {}) {
     workKind: 'operator_mission_graph',
     runtimeGraphId: graphId,
     runtimeMissionId: String(record.childMissionId || ''),
-    canonicalWorkId: String(record.commandId || '')
+    canonicalWorkId: String(record.commandId || ''),
+    ...missionValueMetadata(record)
   };
 }
 
@@ -356,7 +378,8 @@ function projectOperatorAutoPosterCommand(record = {}) {
     approvalId: String(record.approvalId || ''),
     evidenceBundleId: String(record.evidenceBundleId || ''),
     destinationCount: 1,
-    videoCount: 1
+    videoCount: 1,
+    ...missionValueMetadata(record)
   };
 }
 
