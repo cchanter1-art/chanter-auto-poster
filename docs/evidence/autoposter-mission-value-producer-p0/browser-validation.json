@@ -1,0 +1,54 @@
+{
+  "fixture": {
+    "url": "http://127.0.0.1:32148/platform",
+    "canonicalExecutionEnabled": false,
+    "externalEffects": 0
+  },
+  "desktopOverview": {
+    "viewport": {
+      "width": 1280,
+      "height": 720,
+      "scrollWidth": 1265,
+      "bodyScrollWidth": 1265
+    },
+    "eligibleObjectiveVisible": true,
+    "acceptanceCoverageVisible": true,
+    "costUnavailableVisible": true,
+    "humanAttentionUnavailableVisible": true,
+    "noScalarScoreVisible": true,
+    "canonicalExecutionDisabledVisible": true,
+    "defaultComposerActiveVisible": true,
+    "consoleWarningsOrErrors": 0,
+    "screenshot": "desktop-overview.jpg"
+  },
+  "desktopEvidence": {
+    "viewport": {
+      "width": 1280,
+      "scrollWidth": 1265
+    },
+    "exactProviderCriterionVisible": true,
+    "verificationPendingVisible": true,
+    "verifiedVisible": true,
+    "failedVisible": true,
+    "unmappedEvidenceVisible": true,
+    "privateCaptionVisible": false,
+    "privateAccountVisible": false,
+    "consoleWarningsOrErrors": 0,
+    "screenshot": "desktop-evidence.jpg"
+  },
+  "mobileWork": {
+    "viewport": {
+      "width": 390,
+      "height": 844,
+      "scrollWidth": 375,
+      "bodyScrollWidth": 375
+    },
+    "eligibleObjectiveVisible": true,
+    "verificationPendingVisible": true,
+    "verifiedVisible": true,
+    "failedVisible": true,
+    "horizontalOverflow": false,
+    "consoleWarningsOrErrors": 0,
+    "screenshot": "mobile-work.jpg"
+  }
+}
