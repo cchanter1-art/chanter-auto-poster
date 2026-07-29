@@ -378,6 +378,9 @@ function postFromDoc(doc) {
     createdAt: toIsoOrNull(data.createdAt),
     updatedAt: toIsoOrNull(data.updatedAt),
     postedAt: toIsoOrNull(data.postedAt),
+    cancelledAt: toIsoOrNull(data.cancelledAt),
+    cancelledBy: String(data.cancelledBy || '').trim(),
+    cancellationReason: String(data.cancellationReason || '').trim(),
     publishId: data.publishId || '',
     readyAt: toIsoOrNull(data.readyAt),
     // Provider-reported state beyond the queue lifecycle (e.g. YouTube

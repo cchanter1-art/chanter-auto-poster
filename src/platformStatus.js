@@ -60,7 +60,7 @@ function missionValueMetadata(record = {}) {
 
 // AutoPoster's durable batch vocabulary (batchService.deriveBatchStatus, mirrored
 // onto the batch record by refreshBatchRecord) is:
-//   empty | preparing | ready | attention_required | completed
+//   empty | preparing | ready | attention_required | completed | cancelled
 //
 // attention_required is the one status that splits: a batch whose preparation
 // actually failed is a Platform failure, while a batch that merely needs a human
@@ -73,6 +73,7 @@ function autoPosterStateOf(record) {
   if (status === 'empty') return { state: WORK_STATE.IDLE, reason: 'No items.' };
   if (status === 'preparing') return { state: WORK_STATE.RUNNING, reason: 'AI preparation in progress.' };
   if (status === 'completed') return { state: WORK_STATE.COMPLETED, reason: 'All items approved.' };
+  if (status === 'cancelled') return { state: WORK_STATE.PAUSED, reason: 'Cancelled before provider dispatch.' };
   if (status === 'ready') return { state: WORK_STATE.WAITING_APPROVAL, reason: 'Waiting for human review.' };
   if (status === 'attention_required') {
     return failed > 0

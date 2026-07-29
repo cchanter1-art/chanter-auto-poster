@@ -2374,6 +2374,177 @@ async function revokePostApproval(userId, id, accountId, workspaceScope) {
   return postFromDoc(updated);
 }
 
+function cancellationConflict(message, code = 'cancellation_transition_blocked') {
+  const error = new Error(message);
+  error.status = 409;
+  error.code = code;
+  return error;
+}
+
+function hasProviderDispatchEvidence(data = {}) {
+  const status = normalizeQueueStatus(data.status);
+  const lastResult = data.lastResult && typeof data.lastResult === 'object'
+    ? data.lastResult
+    : {};
+  const history = Array.isArray(data.history) ? data.history : [];
+  return (
+    ['processing', 'posted', 'outcome_unknown'].includes(status)
+    || Number(data.claimAttempts || 0) > 0
+    || Boolean(data.lockedAt || data.lockedBy)
+    || Boolean(data.publishId)
+    || Boolean(data.providerOperation || data.dispatchOperation)
+    || Boolean(data.providerVerification)
+    || Boolean(data.providerStatus)
+    || data.outcomeUnknown === true
+    || lastResult.providerMutationStarted === true
+    || lastResult.sessionCreated === true
+    || lastResult.published === true
+    || history.some((entry) => entry && [
+      'publish_attempt',
+      'provider_entered',
+      'posted',
+      'outcome_unknown'
+    ].includes(String(entry.event || '').trim().toLowerCase()))
+  );
+}
+
+// Exact one-item recovery seam for an approved overdue Platform batch job.
+// Approval revocation, terminal cancellation, and the batch projection change
+// share one Firestore transaction. No provider adapter, retry path, media
+// deletion, or scheduler function is reachable from this operation.
+async function cancelApprovedPost(userId, id, options = {}) {
+  const ownerId = userId || DEFAULT_USER_ID;
+  const postId = String(id || '').trim();
+  const batchId = String(options.batchId || '').trim();
+  const expectedScheduledAt = String(options.expectedScheduledAt || '').trim();
+  const expectedApprovedAt = String(options.expectedApprovedAt || '').trim();
+  const expectedPrivacyLevel = String(options.expectedPrivacyLevel || '').trim();
+  const cancelledBy = String(options.cancelledBy || '').trim() || `admin:${ownerId}`;
+  const observedAt = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
+
+  if (!postId || !batchId || !expectedScheduledAt || !expectedApprovedAt || !expectedPrivacyLevel) {
+    const error = new Error('Exact post, batch, schedule, approval, and privacy preconditions are required.');
+    error.status = 400;
+    error.code = 'cancellation_precondition_required';
+    throw error;
+  }
+  if (Number.isNaN(observedAt.getTime())) {
+    const error = new Error('Cancellation observation time is invalid.');
+    error.status = 400;
+    error.code = 'cancellation_precondition_invalid';
+    throw error;
+  }
+
+  const postRef = postsCollection().doc(postId);
+  const batchRef = postBatchesCollection().doc(batchId);
+  const transition = await getFirestore().runTransaction(async (tx) => {
+    const [postSnap, batchSnap] = await Promise.all([
+      tx.get(postRef),
+      tx.get(batchRef)
+    ]);
+    if (!postSnap.exists || !batchSnap.exists) return { outcome: 'not_found' };
+
+    const data = postSnap.data() || {};
+    const batchData = batchSnap.data() || {};
+    if ((data.userId || DEFAULT_USER_ID) !== ownerId) return { outcome: 'not_found' };
+    if (!recordMatchesWorkspace(data, ownerId, options.workspaceScope)) return { outcome: 'not_found' };
+    if ((batchData.userId || DEFAULT_USER_ID) !== ownerId) return { outcome: 'not_found' };
+    if (!recordMatchesWorkspace(batchData, ownerId, options.workspaceScope)) return { outcome: 'not_found' };
+    if (String(data.batchId || '').trim() !== batchId) return { outcome: 'not_found' };
+
+    const post = postFromDoc(postSnap);
+    if (post.status === 'cancelled') {
+      if (!post.approved && post.cancelledAt) return { outcome: 'already_cancelled' };
+      throw cancellationConflict(
+        'The stored cancellation state is incomplete and requires reconciliation.',
+        'cancellation_state_incomplete'
+      );
+    }
+
+    // This P0 is intentionally bounded to the proven one-item accepted batch.
+    // A broader/multi-item cancellation policy needs separate product review.
+    if (
+      Number(batchData.itemCount || 0) !== 1
+      || Number(batchData.acceptedCount || 0) !== 1
+      || Number(batchData.deletedCount || 0) !== 0
+    ) {
+      throw cancellationConflict(
+        'Cancellation is limited to one intact accepted batch item.',
+        'cancellation_batch_scope_blocked'
+      );
+    }
+    if (
+      post.scheduledAt !== expectedScheduledAt
+      || post.approvedAt !== expectedApprovedAt
+      || post.privacyLevel !== expectedPrivacyLevel
+    ) {
+      throw cancellationConflict(
+        'The item changed after inspection; cancellation was refused.',
+        'cancellation_precondition_changed'
+      );
+    }
+    if (expectedPrivacyLevel !== 'SELF_ONLY') {
+      throw cancellationConflict(
+        'This bounded recovery transition is limited to the inspected SELF_ONLY item.',
+        'cancellation_privacy_scope_blocked'
+      );
+    }
+    if (Date.parse(post.scheduledAt) >= observedAt.getTime()) {
+      throw cancellationConflict('The exact item is not overdue.');
+    }
+    if (hasProviderDispatchEvidence(data)) {
+      throw cancellationConflict(
+        'Provider dispatch has started or provider evidence exists; cancellation was refused.',
+        'cancellation_dispatch_started'
+      );
+    }
+    if (post.status !== 'scheduled') {
+      throw cancellationConflict('Only a scheduled item can use this bounded cancellation transition.');
+    }
+    if (!post.approved) {
+      throw cancellationConflict('The exact item is no longer approved.', 'cancellation_approval_changed');
+    }
+
+    const revokedHistory = appendHistoryEntry(
+      data.history,
+      'approval_revoked',
+      'Approval revoked atomically as part of the exact pre-dispatch cancellation.'
+    );
+    const history = appendHistoryEntry(
+      revokedHistory,
+      'cancelled',
+      'Exact approved overdue item cancelled before provider dispatch; history retained.'
+    );
+    const cancellationReason = 'approved_overdue_item_cancelled_before_provider_dispatch';
+    tx.update(postRef, {
+      status: 'cancelled',
+      approvedAt: null,
+      approvedBy: null,
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelledBy,
+      cancellationReason,
+      lockedAt: null,
+      lockedBy: null,
+      history,
+      updatedAt: FieldValue.serverTimestamp()
+    });
+    tx.update(batchRef, {
+      status: 'cancelled',
+      acceptedCount: 0,
+      cancelledCount: 1,
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelledBy,
+      lastCancelledPostId: postId,
+      updatedAt: FieldValue.serverTimestamp()
+    });
+    return { outcome: 'cancelled' };
+  });
+
+  if (transition.outcome === 'not_found') return transition;
+  const post = await getPost(ownerId, postId, undefined, options.workspaceScope);
+  return { ...transition, post };
+}
+
 async function markPostManuallyWithUsage(userId, id, accountId, workspaceScope, completedAt) {
   const ownerId = userId || DEFAULT_USER_ID;
   const ref = postsCollection().doc(id);
@@ -2724,6 +2895,12 @@ function batchRecordFromDoc(doc) {
     // tally of how many were ever removed, atomically incremented so
     // concurrent per-item and whole-batch deletes never lose an update.
     deletedCount: Number(data.deletedCount || 0),
+    cancelledCount: Number(data.cancelledCount || 0),
+    cancelledAt: data.cancelledAt && typeof data.cancelledAt.toDate === 'function'
+      ? data.cancelledAt.toDate().toISOString()
+      : null,
+    cancelledBy: String(data.cancelledBy || '').trim(),
+    lastCancelledPostId: String(data.lastCancelledPostId || '').trim(),
     // Fan-out lineage (V1.2): videoCount is N (source videos uploaded),
     // destinationCount is M (selected accounts); itemCount is the live
     // N x M canonical post total. Both default to itemCount/1 for batches
@@ -3250,6 +3427,7 @@ module.exports = {
   retryFailedPost,
   approvePost,
   revokePostApproval,
+  cancelApprovedPost,
   markPostManuallyWithUsage,
   deletePost,
   movePost,

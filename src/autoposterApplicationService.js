@@ -35,7 +35,7 @@ const DEFAULT_QUEUE_LIMIT = 100;
 const MAX_QUEUE_LIMIT = 1000;
 const INTERNAL_PLAN_DUE_GRACE_MS = 60_000;
 const ISO_WITH_ZONE_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
-const EDIT_BLOCKED_QUEUE_STATUSES = new Set(['processing', 'posted', 'outcome_unknown']);
+const EDIT_BLOCKED_QUEUE_STATUSES = new Set(['processing', 'posted', 'outcome_unknown', 'cancelled']);
 const RUNTIME_SCHEDULE_ACTION = 'autoposter.post.schedule';
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -1506,6 +1506,64 @@ function createAutoPosterApplicationService(dependencies = {}) {
     return { ok: Boolean(post), post };
   }
 
+  async function cancelApprovedPost(contextInput, input = {}) {
+    const context = createExecutionContext(contextInput);
+    const commercialContext = await resolveCommercialContext(context);
+    if (context.source !== 'website') {
+      throw new AutoPosterApplicationError('Only the authenticated website workflow can cancel this item.', {
+        status: 403,
+        code: 'forbidden'
+      });
+    }
+
+    const postId = String(input.postId || '').trim();
+    const batchId = String(input.batchId || '').trim();
+    const expectedScheduledAt = String(input.expectedScheduledAt || '').trim();
+    const expectedApprovedAt = String(input.expectedApprovedAt || '').trim();
+    const expectedPrivacyLevel = String(input.expectedPrivacyLevel || '').trim();
+    if (!postId || !batchId || !expectedScheduledAt || !expectedApprovedAt || !expectedPrivacyLevel) {
+      throw new AutoPosterApplicationError(
+        'Exact post, batch, schedule, approval, and privacy preconditions are required.',
+        { status: 400, code: 'cancellation_precondition_required' }
+      );
+    }
+    if (typeof storageAdapter.cancelApprovedPost !== 'function') {
+      throw new AutoPosterApplicationError('The safe cancellation transition is unavailable.', {
+        status: 503,
+        code: 'cancellation_unavailable'
+      });
+    }
+
+    let transition;
+    try {
+      transition = await storageAdapter.cancelApprovedPost(context.userId, postId, {
+        batchId,
+        expectedScheduledAt,
+        expectedApprovedAt,
+        expectedPrivacyLevel,
+        cancelledBy: context.actorId || `admin:${context.userId}`,
+        workspaceScope: commercialContext.workspaceScope
+      });
+    } catch (error) {
+      throw new AutoPosterApplicationError(error.message || 'Cancellation failed closed.', {
+        status: Number(error.status) || 500,
+        code: String(error.code || 'cancellation_failed'),
+        details: {}
+      });
+    }
+    if (!transition || transition.outcome === 'not_found') {
+      throw new AutoPosterApplicationError('Exact batch item not found for this workspace.', {
+        status: 404,
+        code: 'not_found'
+      });
+    }
+    return {
+      ok: ['cancelled', 'already_cancelled'].includes(transition.outcome),
+      outcome: transition.outcome,
+      post: transition.post || null
+    };
+  }
+
   async function deletePost(contextInput, input = {}) {
     const context = createExecutionContext(contextInput);
     const commercialContext = await resolveCommercialContext(context);
@@ -2148,6 +2206,7 @@ function createAutoPosterApplicationService(dependencies = {}) {
 
   return {
     approvePost,
+    cancelApprovedPost,
     changePostDestination,
     deleteMarkedPosts,
     deletePost,

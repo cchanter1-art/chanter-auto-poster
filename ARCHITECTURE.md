@@ -42,15 +42,15 @@ at most once.
 | `publicImageUrl`, `instagramMediaUrl` | string | Public HTTPS URLs needed for TikTok's `PULL_FROM_URL` photo flow and Instagram. |
 | `privacyLevel`, `disableComment`, `disableDuet`, `disableStitch`, `contentDisclosure`, `yourBrand`, `brandedContent` | various | TikTok Direct Post API settings, unchanged from before. |
 | `scheduledTimeUTC` | Timestamp \| null | When this should publish. Firestore `Timestamp`, not a string — needed for correct `<=` range queries. |
-| `status` | string | `pending` \| `processing` \| `ready` \| `posted` \| `failed`. `processing` replaces the old `publishing` value (see naming note). |
+| `status` | string | `pending` \| `scheduled` \| `processing` \| `ready` \| `posted` \| `failed` \| `outcome_unknown` \| `cancelled`. `cancelled` is terminal and excluded from scheduler claims. |
 | `approvedAt`, `approvedBy` | Timestamp \| null, string \| null | Human-approval gate, orthogonal to `status`. A job is a **draft** until `approvedAt` holds a real Timestamp; `claimPost()` refuses to claim unapproved jobs on every publish path (cron tick, `/run-scheduler`, admin/client "Publish Now"), failing closed on missing or corrupted values. Admin batch intake creates jobs unapproved; the client portal records the client's own single-post submission as approval (`client:@handle`). |
-| `history` | array | Redacted evidence log, capped at 50 entries: `{ at, event, detail? }` for created/validated/edited/approved/approval_revoked/publish_attempt/posted/failed/retry_scheduled/lock_reclaimed. Never stores tokens or raw API payloads. |
+| `history` | array | Redacted evidence log, capped at 50 entries: `{ at, event, detail? }` for created/validated/edited/approved/approval_revoked/cancelled/publish_attempt/posted/failed/retry_scheduled/lock_reclaimed. Never stores tokens or raw API payloads. |
 | `fileSize`, `duplicateWarning` | number, string | Intake duplicate protection: same filename+size (or same public URL) already on the channel sets a human-readable warning on the new draft. Warn-only — the reviewer decides. |
 | `lockedAt` | Timestamp \| null | Set when a worker claims the post; cleared on finalize. |
 | `lockedBy` | string \| null | Which worker holds the claim. |
 | `claimAttempts` | number | Incremented on every claim; used to give up after `SCHEDULER_MAX_ATTEMPTS`. |
 | `order` | number | Manual queue ordering (move up/down). |
-| `createdAt`, `updatedAt`, `postedAt`, `readyAt` | Timestamp \| null | Lifecycle timestamps. |
+| `createdAt`, `updatedAt`, `postedAt`, `readyAt`, `cancelledAt` | Timestamp \| null | Lifecycle timestamps. |
 | `lastResult`, `lastInstagramResult` | map \| null | Raw publish attempt results, shown in the "Advanced" debug panel. |
 
 **Naming notes, called out explicitly rather than silently applied:**

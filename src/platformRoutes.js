@@ -330,7 +330,10 @@ function renderAutoPosterList(mode) {
     const owned = autoPosterWorkItems(work);
     const queueMode = mode === 'queue';
     const items = queueMode
-      ? owned.filter((item) => item.state !== platformStatus.WORK_STATE.COMPLETED)
+      ? owned.filter((item) => ![
+          platformStatus.WORK_STATE.COMPLETED,
+          platformStatus.WORK_STATE.PAUSED
+        ].includes(item.state))
       : owned.filter((item) => item.evidenceAvailable);
     res.render('platform-autoposter-list', {
       appName: config.appName,
@@ -836,6 +839,51 @@ router.post(
     try {
       const result = await batchService.deleteItem(websiteContext(req), req.params.batchId, req.params.postId);
       res.json({ ok: true, ...result });
+    } catch (error) {
+      if (!sendServiceError(res, error)) throw error;
+    }
+  })
+);
+
+router.post(
+  '/api/platform/batches/:batchId/items/:postId/cancel-approved',
+  requireAdminApi,
+  express.json({ limit: '16kb' }),
+  asyncRoute(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const result = await applicationService.cancelApprovedPost(
+        websiteContext(req),
+        {
+          batchId: req.params.batchId,
+          postId: req.params.postId,
+          expectedScheduledAt: req.body && req.body.expectedScheduledAt,
+          expectedApprovedAt: req.body && req.body.expectedApprovedAt,
+          expectedPrivacyLevel: req.body && req.body.expectedPrivacyLevel
+        }
+      );
+      const post = result.post || {};
+      res.json({
+        ok: result.ok,
+        outcome: result.outcome,
+        item: {
+          postId: String(post.id || req.params.postId),
+          batchId: String(post.batchId || req.params.batchId),
+          status: String(post.status || ''),
+          approved: post.approved === true,
+          scheduledAt: post.scheduledAt || null,
+          privacyLevel: String(post.privacyLevel || ''),
+          cancelledAt: post.cancelledAt || null,
+          cancellationReason: String(post.cancellationReason || ''),
+          claimAttempts: Number(post.claimAttempts || 0),
+          providerDispatchEvidencePresent: Boolean(
+            post.publishId
+            || post.providerOperation
+            || (post.lastResult && post.lastResult.providerMutationStarted)
+            || (post.history || []).some((entry) => entry && entry.event === 'publish_attempt')
+          )
+        }
+      });
     } catch (error) {
       if (!sendServiceError(res, error)) throw error;
     }
