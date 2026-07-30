@@ -37,6 +37,15 @@ const firestoreModule = require('../src/firestore');
 firestoreModule.validateFirebaseConfig = () => {
   throw new Error('firebase is deliberately unconfigured for this test');
 };
+// The AutoPoster provider reconciles each batch through batchService.getBatchView,
+// which resolves the workspace scope out of storage. Without this trap that read
+// reaches the real project named in .env, so the file's "no socket is opened"
+// contract held only for the code under test and not for the route tests below —
+// and a slow network turned them into multi-minute hangs. Failing closed here
+// keeps the reconciliation on the fallback path it already took, locally.
+firestoreModule.getFirestore = () => {
+  throw new Error('work provider tests must not reach storage');
+};
 
 const { WORK_STATE } = platformStatus;
 

@@ -13,11 +13,11 @@
 
     <main class="platform-home-main">
       <%- include('_platform-page-header', {
-        eyebrow: 'Founder command center',
+        eyebrow: 'Controlled Publishing',
         title: 'Overview',
-        subtitle: 'System truth, work, decisions, and evidence in one place.',
+        subtitle: 'One controlled path: Prepare, Review, Approve, Evidence. Nothing publishes without a human approval.',
         action: {
-          label: 'Compose',
+          label: 'Prepare content',
           href: '/platform/autoposter/compose'
         }
       }) %>
@@ -74,7 +74,7 @@
             <a class="text-action" href="/platform/work">Inspect</a>
           </div>
           <% if (commandCenter.activeWork.length === 0) { %>
-            <div class="command-empty">No active work is visible.</div>
+            <div class="command-empty" data-testid="overview-active-work-empty">No active work. Prepared work stays visible here until it completes.</div>
           <% } else { %>
             <div class="compact-list">
               <% commandCenter.activeWork.forEach(function (item) { const view = platformStatus.presentation(item.state); %>
@@ -125,7 +125,7 @@
           <a class="text-action" href="/platform/evidence">View Evidence</a>
         </div>
         <% if (commandCenter.recentEvidence.length === 0) { %>
-          <div class="command-empty">No durable work evidence is available.</div>
+          <div class="command-empty" data-testid="overview-evidence-empty">No evidence yet. A durable record appears here for every prepared batch.</div>
         <% } else { %>
           <div class="evidence-strip">
             <% commandCenter.recentEvidence.forEach(function (item) { %>

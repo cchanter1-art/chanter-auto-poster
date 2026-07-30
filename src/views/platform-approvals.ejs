@@ -12,9 +12,9 @@
     <%- include('_platform-nav', { active: locals.active || '' }) %>
     <main class="command-main">
       <%- include('_platform-page-header', {
-        eyebrow: 'Decision queue',
+        eyebrow: 'Human authority',
         title: 'Approvals',
-        subtitle: 'Decision context is visible here. Approval remains inside the owning module.',
+        subtitle: 'Approve is the third stage. The decision context for every waiting item is visible here; approval itself remains inside the owning module.',
         action: { label: 'Inspect', href: '/platform/work', enabled: true, reason: '' }
       }) %>
 
@@ -24,7 +24,10 @@
       <%- include('_platform-degraded', { workError: workError, workDegraded: locals.workDegraded }) %>
 
       <% if (items.length === 0) { %>
-        <div class="command-section command-empty approval-empty" data-testid="approvals-empty">Nothing is waiting for approval.</div>
+        <div class="command-section command-empty command-empty-surface" data-testid="approvals-empty">
+          <strong>Nothing is waiting for approval.</strong>
+          <p>Prepared work arrives here once it is ready for review. Nothing publishes until a person approves it.</p>
+        </div>
       <% } else { %>
         <div class="decision-grid" data-testid="approvals-list">
           <% items.forEach(function (item) { %>

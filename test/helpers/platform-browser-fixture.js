@@ -213,7 +213,13 @@ const FIXTURE_BATCH_ITEMS = new Map([
   ]]
 ]);
 
-batchService.listBatches = async () => ({ batches: FIXTURE_BATCHES });
+// An empty work list is a real, reachable state of every shell surface — it is
+// what a new workspace sees — so the fixture can serve it on request instead of
+// leaving the empty states unverifiable in a browser. Still read-only: this
+// removes projections, it never writes or deletes anything.
+const EMPTY_WORK = String(process.env.PLATFORM_BROWSER_FIXTURE_EMPTY || '') === '1';
+
+batchService.listBatches = async () => ({ batches: EMPTY_WORK ? [] : FIXTURE_BATCHES });
 batchService.getBatchView = async (context, batchId, options = {}) => {
   void context;
   if (options.autoResume !== false) {
@@ -225,7 +231,32 @@ batchService.getBatchView = async (context, batchId, options = {}) => {
   return { batch, items };
 };
 batchService.listSeries = async () => ({ series: [] });
-batchService.listDestinations = async () => ({ destinations: [] });
+
+// The composer only renders its form when at least one account is selectable,
+// so exercising it in a browser needs one connected destination. It is a local
+// invention that exists solely inside this process: no token, no provider
+// client, and no write path is reachable from it. Off by default so the shell's
+// own "no publishing-ready channel" truth stays the fixture's normal state.
+const COMPOSER_DESTINATIONS = String(process.env.PLATFORM_BROWSER_FIXTURE_COMPOSER || '') === '1'
+  ? [{
+      provider: 'tiktok',
+      providerDisplayName: 'TikTok',
+      accountId: 'fixture-local-account',
+      label: '@fixture.local',
+      connected: true,
+      publishingReady: true
+    }]
+  : [];
+batchService.listDestinations = async () => ({ destinations: COMPOSER_DESTINATIONS });
+batchService.getComposerCapabilities = async () => ({
+  planId: 'fixture-local',
+  multiAccountPosting: true,
+  perAccountOverrides: true,
+  maxDestinationsPerPost: 5,
+  maxItemsPerDraft: 20,
+  advancedScheduling: true,
+  schedulingHorizonDays: 90
+});
 
 const providers = require('../../src/providers');
 const readProviderStatus = providers.getProviderStatus;
@@ -254,6 +285,8 @@ const server = app.listen(port, '127.0.0.1', () => {
     ready: true,
     url: `http://127.0.0.1:${port}/platform`,
     canonicalExecutionEnabled: false,
+    emptyWork: EMPTY_WORK,
+    composerDestinations: COMPOSER_DESTINATIONS.length,
     externalEffects: 0
   }));
 });

@@ -313,6 +313,101 @@ test('platform shell serves six canonical surfaces with separated boundaries', a
   assert.ok(pages['/platform/health'].includes('Required'));
 });
 
+// ── Commercial dressing: one vocabulary, and truthful empty surfaces ───────
+
+test('the customer surface names the same four stages everywhere', async (t) => {
+  const originalListBatches = batchService.listBatches;
+  batchService.listBatches = async () => ({ batches: BATCH_RECORDS });
+  const server = await startServer();
+  t.after(() => {
+    batchService.listBatches = originalListBatches;
+    server.close();
+  });
+
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const page = async (path) => (await fetch(`${baseUrl}${path}`)).text();
+
+  // Overview is the one place that states the whole path, and it states the
+  // guarantee the offer is sold on.
+  const overview = await page('/platform');
+  assert.ok(overview.includes('Controlled Publishing'));
+  assert.ok(overview.includes('One controlled path: Prepare, Review, Approve, Evidence.'));
+  assert.ok(overview.includes('Nothing publishes without a human approval.'));
+  assert.ok(!overview.includes('Founder command center'), 'the customer surface is not addressed to the founder');
+
+  // Each surface then names its own stage rather than describing itself in
+  // internal terms.
+  assert.match(await page('/platform/work'), /Prepare and Review/);
+  assert.match(await page('/platform/approvals'), /Approve is the third stage\./);
+  assert.match(await page('/platform/evidence'), /Evidence is the final stage/);
+
+  // AutoPoster stays the only customer module, and the Modules page says so.
+  const modules = await page('/platform/modules');
+  assert.ok(modules.includes('AutoPoster is the customer module.'));
+  assert.equal((modules.match(/data-surface="customer"/g) || []).length, 1);
+});
+
+test('an empty surface states the fact and which stage fills it', async (t) => {
+  const originalListBatches = batchService.listBatches;
+  batchService.listBatches = async () => ({ batches: [] });
+  const server = await startServer();
+  t.after(() => {
+    batchService.listBatches = originalListBatches;
+    server.close();
+  });
+
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const page = async (path) => (await fetch(`${baseUrl}${path}`)).text();
+
+  const work = await page('/platform/work');
+  assert.ok(work.includes('data-testid="work-empty"'));
+  assert.ok(work.includes('No work yet.'));
+  assert.ok(work.includes('Prepare, Review, Approve, Evidence.'));
+  // With nothing at all to show, four per-state empties would be four ways of
+  // saying the same thing.
+  assert.ok(!work.includes('data-testid="work-groups"'));
+  assert.ok(!work.includes('data-empty-group='));
+
+  const approvals = await page('/platform/approvals');
+  assert.ok(approvals.includes('data-testid="approvals-empty"'));
+  assert.ok(approvals.includes('Nothing is waiting for approval.'));
+  assert.ok(approvals.includes('Nothing publishes until a person approves it.'));
+
+  const evidence = await page('/platform/evidence');
+  assert.ok(evidence.includes('data-testid="evidence-empty"'));
+  assert.ok(evidence.includes('No evidence yet.'));
+  assert.ok(evidence.includes('durable record here'));
+
+  const overview = await page('/platform');
+  assert.ok(overview.includes('data-testid="overview-active-work-empty"'));
+  assert.ok(overview.includes('data-testid="overview-evidence-empty"'));
+
+  // An empty surface is still a read-only surface.
+  for (const html of [work, approvals, evidence, overview]) {
+    assert.equal((html.match(/<form/g) || []).length, 1, 'only the shell sign-out form exists');
+    assert.ok(!html.includes('<button type="submit" class="btn btn-primary"'));
+  }
+});
+
+test('a partly filled Work surface names the stage each empty group is missing', async (t) => {
+  const originalListBatches = batchService.listBatches;
+  batchService.listBatches = async () => ({ batches: [BATCH_RECORDS[1]] });
+  const server = await startServer();
+  t.after(() => {
+    batchService.listBatches = originalListBatches;
+    server.close();
+  });
+
+  const work = await (await fetch(`http://127.0.0.1:${server.address().port}/platform/work`)).text();
+  assert.ok(work.includes('data-testid="work-groups"'));
+  assert.ok(!work.includes('data-testid="work-empty"'), 'existing work is not reported as no work');
+  assert.ok(work.includes('data-empty-group="running">Nothing is being prepared right now.'));
+  assert.ok(work.includes('data-empty-group="attention">Nothing needs attention.'));
+  assert.ok(work.includes('data-empty-group="complete">Nothing has completed yet.'));
+  assert.ok(!work.includes('data-empty-group="waiting"'), 'the one waiting batch fills its own group');
+  assert.ok(!work.includes('No work in this state.'));
+});
+
 test('Overview, Work, and Evidence render the same truthful mission value evaluation', async (t) => {
   const originalListBatches = batchService.listBatches;
   batchService.listBatches = async () => ({

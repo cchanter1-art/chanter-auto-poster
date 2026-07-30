@@ -118,16 +118,22 @@ function decorateWork(items = []) {
   });
 }
 
+// `emptyLabel` is the copy a group shows when it holds nothing while other work
+// exists. It names the missing stage rather than repeating one generic line, so
+// an empty group reads as a fact about that stage instead of as missing data.
+// The whole-surface empty state is a different fact and is owned by the view.
 function groupWork(items = []) {
   const groups = [
     {
       id: 'running',
       label: 'Running',
+      emptyLabel: 'Nothing is being prepared right now.',
       items: items.filter((item) => item.state === platformStatus.WORK_STATE.RUNNING)
     },
     {
       id: 'waiting',
       label: 'Waiting',
+      emptyLabel: 'Nothing is waiting for review or approval.',
       items: items.filter((item) => [
         platformStatus.WORK_STATE.WAITING_APPROVAL,
         platformStatus.WORK_STATE.PAUSED,
@@ -137,11 +143,13 @@ function groupWork(items = []) {
     {
       id: 'attention',
       label: 'Needs attention',
+      emptyLabel: 'Nothing needs attention.',
       items: items.filter((item) => item.state === platformStatus.WORK_STATE.FAILED)
     },
     {
       id: 'complete',
       label: 'Complete',
+      emptyLabel: 'Nothing has completed yet.',
       items: items.filter((item) => item.state === platformStatus.WORK_STATE.COMPLETED)
     }
   ];

@@ -78,7 +78,7 @@ test('clean Composer and Accounts surfaces use canonical module destinations', (
   const composer = read('src/views/platform-compose.ejs');
   const accounts = read('src/views/platform-accounts.ejs');
   assert.match(composer, /id="compose-form"/);
-  assert.match(composer, /href="\/platform\/autoposter\/queue">View Queue<\/a>/);
+  assert.match(composer, /href="\/platform\/autoposter\/queue">Review queue<\/a>/);
   assert.doesNotMatch(composer, /href="\/private\/autoposter/);
   assert.match(accounts, /Current Account/);
   assert.match(accounts, /href="\/platform\/autoposter\/compose">Done<\/a>/);

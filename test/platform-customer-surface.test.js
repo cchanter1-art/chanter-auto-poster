@@ -105,11 +105,25 @@ test('upload reveals only the action-first scheduling controls', () => {
   assert.match(html, /<input id="startTime" type="time">/);
   assert.match(html, /<textarea id="caption"/);
   assert.match(html, /id="select-all-assets"[^>]*aria-pressed="true">Select All</);
-  assert.match(html, /id="submit-btn" type="submit" class="btn btn-primary" disabled>Go</);
+  assert.match(html, /id="submit-btn" type="submit" class="btn btn-primary" disabled>Prepare for review</);
+  assert.doesNotMatch(html, /disabled>Go</, 'the dominant action names what it actually does');
   assert.match(html, /id="review-list" class="review-list sr-only"/, 'verbose readiness stays non-visual');
   assert.match(html, /assetSelection\[fileKey\(file\)\] = true/, 'uploaded assets default selected');
   assert.match(html, /classList\.toggle\('has-files', selectedFiles\.length > 0\)/, 'URL input stays editable when it is the active source');
   assert.match(html, /selectedSourceFiles\(\)\.forEach\(function \(file\) \{ data\.append\('videos', file\); \}\)/);
+});
+
+test('the review summary re-reads the date and time the customer actually chose', () => {
+  const html = renderComposer();
+  // scheduleSummary() reads both fields live, so the review list, the schedule
+  // step state and the submit gate are only ever as fresh as the listeners that
+  // re-run update() when either field changes.
+  assert.match(html, /var date = document\.getElementById\('startDate'\)\.value;/);
+  assert.match(
+    html,
+    /\[document\.getElementById\('startDate'\), document\.getElementById\('startTime'\)\]\.forEach\(function \(field\) \{[\s\S]{0,200}?field\.addEventListener\('input', update\);[\s\S]{0,80}?field\.addEventListener\('change', update\);/,
+    'both primary schedule fields refresh the review summary'
+  );
 });
 
 test('secondary capability is preserved behind one options disclosure', () => {
@@ -137,9 +151,10 @@ test('canonical acceptance collapses to a compact success and errors expose one 
   assert.match(html, /payload && payload\.ok && \(acceptedCommand \|\| payload\.batch \|\| payload\.series\)/);
   assert.match(html, /form\.classList\.add\('hidden'\)/);
   assert.match(html, /success\.classList\.remove\('hidden'\)/);
-  assert.match(html, /<strong id="success-message" tabindex="-1">✓ Scheduled<\/strong>/);
-  assert.match(html, />View Queue<\/a>/);
-  assert.match(html, /showNotice\('Could not schedule '/);
+  assert.match(html, /<strong id="success-message" tabindex="-1">✓ Prepared for review<\/strong>/);
+  assert.match(html, /Every item stays a draft until you approve it\./);
+  assert.match(html, />Review queue<\/a>/);
+  assert.match(html, /showNotice\('Could not prepare '/);
   assert.match(html, /review\.textContent = 'Review'/);
   assert.doesNotMatch(html, /window\.location\.href/);
   assert.doesNotMatch(html, /\/api\/instagram\/publish|\/posts\/[^']*\/prepare/);

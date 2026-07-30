@@ -148,6 +148,20 @@ test('work groups and actions reuse canonical state and module authority', () =>
   );
 });
 
+test('every work group carries its own stage-specific empty copy', () => {
+  const result = platformCommandCenter.buildCommandCenter(input());
+  const byId = Object.fromEntries(result.workGroups.map((group) => [group.id, group]));
+
+  assert.deepEqual(Object.keys(byId), ['running', 'waiting', 'attention', 'complete']);
+  assert.equal(byId.running.emptyLabel, 'Nothing is being prepared right now.');
+  assert.equal(byId.waiting.emptyLabel, 'Nothing is waiting for review or approval.');
+  assert.equal(byId.attention.emptyLabel, 'Nothing needs attention.');
+  assert.equal(byId.complete.emptyLabel, 'Nothing has completed yet.');
+  // The copy is per stage, never one line repeated four times.
+  const labels = result.workGroups.map((group) => group.emptyLabel);
+  assert.equal(new Set(labels).size, labels.length);
+});
+
 test('unknown storage and environment remain explicitly unavailable', () => {
   const values = input([]);
   values.work.summary = platformStatus.summarizeWork([]);

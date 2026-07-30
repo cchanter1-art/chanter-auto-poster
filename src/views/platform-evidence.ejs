@@ -14,7 +14,7 @@
       <%- include('_platform-page-header', {
         eyebrow: 'Durable work record',
         title: 'Evidence',
-        subtitle: 'Search measured work records without changing execution state.',
+        subtitle: 'Evidence is the final stage: what was prepared, approved, and completed. Searching changes no execution state.',
         action: { label: 'Inspect', href: '/platform/work', enabled: true, reason: '' }
       }) %>
 
@@ -41,7 +41,10 @@
       </div>
 
       <% if (items.length === 0) { %>
-        <div class="command-section command-empty" data-testid="evidence-empty">No durable work evidence is available.</div>
+        <div class="command-section command-empty command-empty-surface" data-testid="evidence-empty">
+          <strong>No evidence yet.</strong>
+          <p>Every prepared batch keeps a durable record here, from review through approval to completion.</p>
+        </div>
       <% } else { %>
         <div class="evidence-ledger" data-testid="evidence-list">
           <% items.forEach(function (item) { %>
@@ -99,7 +102,10 @@
             </article>
           <% }); %>
         </div>
-        <div id="evidence-filter-empty" class="command-section command-empty" hidden>No evidence matches this filter.</div>
+        <div id="evidence-filter-empty" class="command-section command-empty command-empty-surface" hidden>
+          <strong>No evidence matches this filter.</strong>
+          <p>Clear the search box or choose All states.</p>
+        </div>
       <% } %>
       <p class="footer-note">Internal runtime ledgers stay behind Operator and are not exposed here.</p>
     </main>

@@ -1032,6 +1032,14 @@ textarea { resize: vertical; min-height: 64px; }
 .success-state strong { font-size: 24px; font-weight: 650; }
 .success-state strong:focus { outline: none; }
 .success-state .btn { min-height: 48px; }
+/* The gap above already separates the three rows; the note only needs to read
+   as the quiet half of the acknowledgement, not as a second headline. */
+.success-state .success-note {
+  margin-top: -12px;
+  max-width: 34ch;
+  color: var(--text-dim);
+  font-size: 13.5px;
+}
 
 .customer-compose button:focus-visible,
 .customer-compose a:focus-visible,
@@ -1639,6 +1647,28 @@ a.command-action:hover {
   color: var(--text-faint);
   font-size: 13px;
 }
+/* A whole surface with nothing on it states the fact first and explains which
+   stage fills it second, so an empty Work, Approvals or Evidence page reads as
+   a true answer rather than as a page that failed to load. */
+.command-empty-surface {
+  display: grid;
+  gap: 6px;
+  margin-top: 0;
+  padding: 30px;
+  text-align: center;
+}
+.command-empty-surface strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+}
+.command-empty-surface p {
+  max-width: 62ch;
+  margin: 0 auto;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1.55;
+}
 .command-split {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr);
@@ -1846,7 +1876,6 @@ a.command-action:hover {
 .decision-fields div:first-child { padding-left: 0; }
 .decision-fields div:last-child { border-right: 0; }
 .decision-reason { margin: 0 0 16px; color: var(--text-dim); font-size: 12.5px; }
-.approval-empty { margin-top: 0; padding: 30px; text-align: center; }
 .evidence-tools {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(160px, 240px) auto;

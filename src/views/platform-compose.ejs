@@ -12,7 +12,7 @@
     <%- include('_platform-nav', { active: locals.active || '' }) %>
 
     <main class="customer-main" data-customer-surface="simple">
-      <h1 class="sr-only">Schedule content</h1>
+      <h1 class="sr-only">Prepare content for review</h1>
       <div id="notice" class="customer-error hidden" role="alert" aria-live="assertive"></div>
 
       <% if (selectableCount === 0) { %>
@@ -254,15 +254,19 @@
               <span class="sr-only" data-state-for="review"></span>
               <ul id="review-list" class="review-list sr-only" aria-live="polite"></ul>
               <button id="select-all-assets" type="button" class="btn btn-secondary" aria-pressed="true">Select All</button>
-              <button id="submit-btn" type="submit" class="btn btn-primary" disabled>Go</button>
+              <!-- The truthful name of what this button does: it creates drafts and
+                   starts their preparation. It publishes nothing and approves
+                   nothing — every item still needs a human decision in review. -->
+              <button id="submit-btn" type="submit" class="btn btn-primary" disabled>Prepare for review</button>
               <span id="submit-status" class="item-note" aria-live="polite"></span>
             </section>
           </div>
         </form>
 
         <section id="success-state" class="success-state hidden" aria-live="polite">
-          <strong id="success-message" tabindex="-1">✓ Scheduled</strong>
-          <a class="btn btn-primary" href="/platform/autoposter/queue">View Queue</a>
+          <strong id="success-message" tabindex="-1">✓ Prepared for review</strong>
+          <span class="success-note">Every item stays a draft until you approve it.</span>
+          <a class="btn btn-primary" href="/platform/autoposter/queue">Review queue</a>
         </section>
       <% } %>
     </main>
@@ -671,6 +675,18 @@
       }
 
       // ── 4 · Schedule ──
+      // The two primary date/time fields drive the review summary, the schedule
+      // step state, the series preview and the submit gate. Without these
+      // listeners every one of them kept reporting the value that was in the
+      // field at the last unrelated update — so a corrected time was reviewed
+      // as the old one, and a cleared date still read as ready to submit.
+      // Both events are bound because a native picker and typing do not agree
+      // on which one they fire.
+      [document.getElementById('startDate'), document.getElementById('startTime')].forEach(function (field) {
+        if (!field) return;
+        field.addEventListener('input', update);
+        field.addEventListener('change', update);
+      });
       Array.prototype.slice.call(document.querySelectorAll('input[name="when"]')).forEach(function (radio) {
         radio.addEventListener('change', function () {
           scheduleAt.classList.toggle('hidden', currentWhen() !== 'at');
@@ -952,7 +968,7 @@
         var itemCount = selectedSourceFiles().length || (usingUrlSource() ? 1 : 0);
         submitBtn.disabled = false;
         submitStatus.textContent = '';
-        showNotice('Could not schedule ' + itemCount + (itemCount === 1 ? ' item.' : ' items.'), 'error');
+        showNotice('Could not prepare ' + itemCount + (itemCount === 1 ? ' item.' : ' items.'), 'error');
       }
 
       form.addEventListener('submit', function (event) {
@@ -962,7 +978,7 @@
         if ((selectedSourceFiles().length === 0 && !usingUrlSource()) || destinations.length === 0) return;
         clearNotice();
         submitBtn.disabled = true;
-        submitStatus.innerHTML = '<span class="spin"></span> Scheduling…';
+        submitStatus.innerHTML = '<span class="spin"></span> Preparing…';
 
         var data = new FormData();
         selectedSourceFiles().forEach(function (file) { data.append('videos', file); });
