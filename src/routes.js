@@ -19,9 +19,11 @@ const { sanitizePostResult } = require('./postsMapper');
 const { DEFAULT_OFFSET_MINUTES } = require('./maxScheduler');
 const { summarizeCampaigns, latestCampaignChannelCount } = require('./campaignAccounting');
 const clientRoutes = require('./clientRoutes');
+const previewService = require('./previewService');
 const {
   VIDEO_ONLY_UPLOAD_MESSAGE,
-  isVideoUploadFile
+  isVideoUploadFile,
+  isImageUploadFile
 } = require('./mediaPolicy');
 const {
   clearAdminSessionCookie,
@@ -38,6 +40,23 @@ const router = express.Router();
 const ACTIVE_TIKTOK_ACCOUNT_COOKIE = 'autoposter_tiktok_account_id';
 const loginAttempts = new Map();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+const previewUpload = multer({
+  storage: multer.diskStorage({
+    destination: config.uploadsDir,
+    filename: (req, file, callback) => {
+      const extension = path.extname(file.originalname || '').toLowerCase() || defaultExtension(file);
+      callback(null, `preview-src-${Date.now()}-${randomUUID()}${extension}`);
+    }
+  }),
+  fileFilter: (req, file, callback) => {
+    if (isImageUploadFile(file)) { callback(null, true); return; }
+    const error = new Error('Smart Media Preview requires a JPG, JPEG, PNG, or WebP image.');
+    error.status = 400;
+    callback(error);
+  },
+  limits: { files: 1, fileSize: config.mediaPreview ? config.mediaPreview.maxUploadBytes : 25 * 1024 * 1024 }
+});
 const LOGIN_MAX_ATTEMPTS = 5;
 
 const upload = multer({
@@ -2050,5 +2069,66 @@ function wantsJson(req) {
   const ct = String(req.headers['content-type'] || '').toLowerCase();
   return accept.includes('application/json') || ct.includes('application/json');
 }
+
+router.post(
+  '/api/preview/image-music',
+  requireAdminApi,
+  (req, res, next) => {
+    previewUpload.single('image')(req, res, (err) => {
+      if (err) {
+        res.status(400).json({ ok: false, code: 'INVALID_IMAGE_UPLOAD', reason: err.message });
+        return;
+      }
+      next();
+    });
+  },
+  asyncRoute(async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ ok: false, code: 'MISSING_IMAGE', reason: 'Choose an image file before creating a preview.' });
+      return;
+    }
+
+    try {
+      const durationSeconds = Number(req.body.durationSeconds);
+      const segmentStartSeconds = Number(req.body.segmentStartSeconds || 0);
+      const focalX = Number(req.body.focalX ?? 0.5);
+      const focalY = Number(req.body.focalY ?? 0.5);
+      const trackId = String(req.body.trackId || '').trim();
+
+      const preview = await previewService.createImageMusicPreview({
+        userId: resolveUserId(req),
+        imagePath: req.file.path,
+        originalName: req.file.originalname,
+        originalSize: req.file.size,
+        durationSeconds,
+        trackId,
+        segmentStartSeconds,
+        focalX,
+        focalY
+      });
+
+      res.json({
+        ok: true,
+        previewId: preview.previewId,
+        previewUrl: preview.previewUrl,
+        token: preview.token,
+        manifest: preview.manifest,
+        render: preview.render
+      });
+    } catch (error) {
+      const status = ['TRACK_NOT_FOUND', 'TRACK_NOT_VERIFIED', 'INVALID_PREVIEW_REQUEST', 'SEGMENT_OVERFLOW', 'MISSING_IMAGE'].includes(error.code)
+        ? 400
+        : (error.code === 'PREVIEW_NOT_CONFIGURED' ? 503 : 422);
+
+      res.status(status).json({
+        ok: false,
+        code: error.code || 'PREVIEW_FAILED',
+        reason: error.message
+      });
+    } finally {
+      await removeTemporaryUpload(req.file.path);
+    }
+  })
+);
 
 module.exports = router;
