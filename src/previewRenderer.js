@@ -166,7 +166,7 @@ async function renderImageMusicPreview(params, options = {}) {
       throw previewError('FFmpeg did not create a usable preview video', 'PREVIEW_RENDER_FAILED');
     }
 
-    // Verify output dimensions, codec, and duration
+    // Verify output dimensions, codecs, frame rate, and duration
     const probeResult = await probeVideoOutput(outputPath, options);
     const durationDiff = Math.abs(probeResult.durationSeconds - durationSeconds);
     if (durationDiff >= MAX_DURATION_DRIFT_SECONDS) {
@@ -179,9 +179,11 @@ async function renderImageMusicPreview(params, options = {}) {
     return {
       outputPath,
       size: stats.size,
-      width: TARGET_WIDTH,
-      height: TARGET_HEIGHT,
-      frameRate: TARGET_FPS,
+      width: probeResult.width,
+      height: probeResult.height,
+      frameRate: probeResult.frameRate,
+      videoCodec: probeResult.videoCodec,
+      audioCodec: probeResult.audioCodec,
       durationSeconds,
       renderedDurationSeconds: probeResult.durationSeconds,
       durationDiffSeconds: Number(durationDiff.toFixed(3)),
@@ -244,15 +246,54 @@ async function probeVideoOutput(filePath, options = {}) {
   const video = streams.find((s) => s.codec_type === 'video');
   if (!video) throw previewError('No video stream in output', 'PREVIEW_PROBE_FAILED');
 
+  const audio = streams.find((s) => s.codec_type === 'audio');
+  if (!audio) throw previewError('No audio stream in output', 'PREVIEW_PROBE_FAILED');
+
+  const width = Number(video.width);
+  const height = Number(video.height);
+  const videoCodec = String(video.codec_name || '').toLowerCase();
+  const audioCodec = String(audio.codec_name || '').toLowerCase();
+
+  const fpsStr = String(video.avg_frame_rate || video.r_frame_rate || '').trim();
+  let frameRate = 0;
+  if (fpsStr.includes('/')) {
+    const parts = fpsStr.split('/');
+    const num = Number(parts[0]);
+    const den = Number(parts[1]);
+    if (Number.isFinite(num) && Number.isFinite(den) && den > 0) {
+      frameRate = Math.round(num / den);
+    }
+  } else {
+    frameRate = Math.round(Number(fpsStr) || 0);
+  }
+
+  if (width !== TARGET_WIDTH) {
+    throw previewError(`Measured width ${width} does not match expected ${TARGET_WIDTH}`, 'PREVIEW_PROBE_FAILED');
+  }
+  if (height !== TARGET_HEIGHT) {
+    throw previewError(`Measured height ${height} does not match expected ${TARGET_HEIGHT}`, 'PREVIEW_PROBE_FAILED');
+  }
+  if (videoCodec !== 'h264') {
+    throw previewError(`Measured video codec '${videoCodec}' does not match expected 'h264'`, 'PREVIEW_PROBE_FAILED');
+  }
+  if (audioCodec !== 'aac') {
+    throw previewError(`Measured audio codec '${audioCodec}' does not match expected 'aac'`, 'PREVIEW_PROBE_FAILED');
+  }
+  if (frameRate !== TARGET_FPS) {
+    throw previewError(`Measured frame rate ${frameRate} does not match expected ${TARGET_FPS}`, 'PREVIEW_PROBE_FAILED');
+  }
+
   const duration = Number(video.duration)
     || Number(probe.format && probe.format.duration)
     || 0;
 
   return {
     durationSeconds: Number(duration.toFixed(3)),
-    width: Number(video.width),
-    height: Number(video.height),
-    codecName: video.codec_name
+    width,
+    height,
+    frameRate,
+    videoCodec,
+    audioCodec
   };
 }
 
@@ -270,5 +311,6 @@ function previewError(message, code, cause) {
 module.exports = {
   PREVIEW_DURATIONS,
   validatePreviewRequest,
-  renderImageMusicPreview
+  renderImageMusicPreview,
+  probeVideoOutput
 };

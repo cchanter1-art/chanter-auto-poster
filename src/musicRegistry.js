@@ -15,6 +15,31 @@ const REQUIRED_FIELDS = [
 ];
 const VALID_RIGHTS_STATUSES = new Set(['verified', 'unverified', 'restricted']);
 
+const registryLocks = new Map();
+
+async function withRegistryLock(registryPath, fn) {
+  const key = path.resolve(registryPath);
+  const previous = registryLocks.get(key) || Promise.resolve();
+
+  let release;
+  const current = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  const nextChain = previous.then(() => current, () => current);
+  registryLocks.set(key, nextChain);
+
+  try {
+    await previous.catch(() => {});
+    return await fn();
+  } finally {
+    release();
+    if (registryLocks.get(key) === nextChain) {
+      registryLocks.delete(key);
+    }
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────
 
 async function registerMusicTrack(input, options = {}) {
@@ -23,72 +48,77 @@ async function registerMusicTrack(input, options = {}) {
   const registryPath = options.registryPath || registryFilePath();
   const absolutePath = safeLibraryPath(record.filename, libraryDir);
 
-  const stat = await fsp.stat(absolutePath).catch(() => null);
-  if (!stat || !stat.isFile()) {
-    throw registryError(`Track file does not exist: ${record.filename}`, 'TRACK_FILE_MISSING');
-  }
+  return withRegistryLock(registryPath, async () => {
+    const stat = await fsp.stat(absolutePath).catch(() => null);
+    if (!stat || !stat.isFile()) {
+      throw registryError(`Track file does not exist: ${record.filename}`, 'TRACK_FILE_MISSING');
+    }
 
-  const sha256 = await computeSha256(absolutePath);
-  const durationSeconds = await probeTrackDuration(absolutePath, options);
+    const sha256 = await computeSha256(absolutePath);
+    const durationSeconds = await probeTrackDuration(absolutePath, options);
 
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-    throw registryError('Track duration must be a finite positive number', 'INVALID_TRACK_DURATION');
-  }
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      throw registryError('Track duration must be a finite positive number', 'INVALID_TRACK_DURATION');
+    }
 
-  const finalRecord = {
-    id: record.id,
-    sha256,
-    filename: record.filename,
-    title: record.title,
-    provider: record.provider,
-    providerAssetId: record.providerAssetId || '',
-    category: record.category,
-    mood: record.mood,
-    bpm: record.bpm,
-    intensity: record.intensity,
-    tags: record.tags,
-    durationSeconds: Number(durationSeconds.toFixed(3)),
-    instrumental: record.instrumental !== false,
-    rightsStatus: record.rightsStatus,
-    licencePlan: record.licencePlan || '',
-    licenceEvidenceRef: record.licenceEvidenceRef,
-    sourceCreatedAt: record.sourceCreatedAt || '',
-    registeredAt: new Date().toISOString()
-  };
+    const finalRecord = {
+      id: record.id,
+      sha256,
+      filename: record.filename,
+      title: record.title,
+      provider: record.provider,
+      providerAssetId: record.providerAssetId || '',
+      category: record.category,
+      mood: record.mood,
+      bpm: record.bpm,
+      intensity: record.intensity,
+      tags: record.tags,
+      durationSeconds: Number(durationSeconds.toFixed(3)),
+      instrumental: record.instrumental !== false,
+      rightsStatus: record.rightsStatus,
+      licencePlan: record.licencePlan || '',
+      licenceEvidenceRef: record.licenceEvidenceRef,
+      sourceCreatedAt: record.sourceCreatedAt || '',
+      registeredAt: new Date().toISOString()
+    };
 
-  const registry = await loadRegistryFile(registryPath);
-  if (registry.tracks.some((t) => t.id === finalRecord.id)) {
-    throw registryError(`Duplicate track ID: ${finalRecord.id}`, 'DUPLICATE_TRACK_ID');
-  }
-  if (registry.tracks.some((t) => t.sha256 === finalRecord.sha256)) {
-    throw registryError(`Duplicate track hash: ${finalRecord.sha256.slice(0, 16)}…`, 'DUPLICATE_TRACK_HASH');
-  }
+    const registry = await loadRegistryFile(registryPath);
+    if (registry.tracks.some((t) => t.id === finalRecord.id)) {
+      throw registryError(`Duplicate track ID: ${finalRecord.id}`, 'DUPLICATE_TRACK_ID');
+    }
+    if (registry.tracks.some((t) => t.sha256 === finalRecord.sha256)) {
+      throw registryError(`Duplicate track hash: ${finalRecord.sha256.slice(0, 16)}…`, 'DUPLICATE_TRACK_HASH');
+    }
 
-  registry.tracks.push(finalRecord);
-  await writeRegistryFile(registryPath, registry);
+    registry.tracks.push(finalRecord);
+    await writeRegistryFile(registryPath, registry);
 
-  return {
-    ...finalRecord,
-    absolutePath
-  };
+    return {
+      ...finalRecord,
+      absolutePath
+    };
+  });
 }
 
 async function loadRegisteredMusic(options = {}) {
   const libraryDir = options.libraryDir || config.autoMusic.libraryDir;
   const registryPath = options.registryPath || registryFilePath();
-  const registry = await loadRegistryFile(registryPath);
 
-  return registry.tracks
-    .filter((t) => t.rightsStatus === 'verified')
-    .map((t) => ({
-      ...t,
-      absolutePath: safeLibraryPath(t.filename, libraryDir)
-    }))
-    .filter((t) => {
-      try {
-        return fs.existsSync(t.absolutePath) && fs.statSync(t.absolutePath).isFile();
-      } catch { return false; }
-    });
+  return withRegistryLock(registryPath, async () => {
+    const registry = await loadRegistryFile(registryPath);
+
+    return registry.tracks
+      .filter((t) => t.rightsStatus === 'verified')
+      .map((t) => ({
+        ...t,
+        absolutePath: safeLibraryPath(t.filename, libraryDir)
+      }))
+      .filter((t) => {
+        try {
+          return fs.existsSync(t.absolutePath) && fs.statSync(t.absolutePath).isFile();
+        } catch { return false; }
+      });
+  });
 }
 
 function validateRegistrationRecord(input) {
@@ -148,14 +178,17 @@ function validateRegistrationRecord(input) {
 async function getRegisteredTrackById(trackId, options = {}) {
   const libraryDir = options.libraryDir || config.autoMusic.libraryDir;
   const registryPath = options.registryPath || registryFilePath();
-  const registry = await loadRegistryFile(registryPath);
-  const record = registry.tracks.find((t) => t.id === trackId);
-  if (!record) return null;
 
-  return {
-    ...record,
-    absolutePath: safeLibraryPath(record.filename, libraryDir)
-  };
+  return withRegistryLock(registryPath, async () => {
+    const registry = await loadRegistryFile(registryPath);
+    const record = registry.tracks.find((t) => t.id === trackId);
+    if (!record) return null;
+
+    return {
+      ...record,
+      absolutePath: safeLibraryPath(record.filename, libraryDir)
+    };
+  });
 }
 
 async function probeTrackDuration(trackPath, options = {}) {
@@ -185,14 +218,51 @@ function registryFilePath() {
 }
 
 async function loadRegistryFile(filePath) {
+  let raw;
   try {
-    const raw = await fsp.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.version === REGISTRY_SCHEMA_VERSION && Array.isArray(parsed.tracks)) {
-      return parsed;
+    raw = await fsp.readFile(filePath, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return { version: REGISTRY_SCHEMA_VERSION, tracks: [] };
     }
-  } catch { /* file missing or malformed — start fresh */ }
-  return { version: REGISTRY_SCHEMA_VERSION, tracks: [] };
+    throw registryError(`Failed to read music registry: ${err.message}`, 'INVALID_MUSIC_REGISTRY');
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw registryError('Malformed music registry JSON', 'INVALID_MUSIC_REGISTRY');
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    parsed.version !== REGISTRY_SCHEMA_VERSION ||
+    !Array.isArray(parsed.tracks)
+  ) {
+    throw registryError('Invalid music registry schema', 'INVALID_MUSIC_REGISTRY');
+  }
+
+  for (const track of parsed.tracks) {
+    if (
+      !track ||
+      typeof track !== 'object' ||
+      typeof track.id !== 'string' ||
+      !track.id ||
+      typeof track.sha256 !== 'string' ||
+      !track.sha256 ||
+      typeof track.filename !== 'string' ||
+      !track.filename ||
+      typeof track.rightsStatus !== 'string' ||
+      !track.rightsStatus
+    ) {
+      throw registryError('Invalid stored track record in registry', 'INVALID_MUSIC_REGISTRY');
+    }
+  }
+
+  return parsed;
 }
 
 async function writeRegistryFile(filePath, registry) {
@@ -239,5 +309,6 @@ module.exports = {
   loadRegisteredMusic,
   validateRegistrationRecord,
   getRegisteredTrackById,
-  probeTrackDuration
+  probeTrackDuration,
+  computeSha256
 };

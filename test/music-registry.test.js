@@ -247,3 +247,89 @@ test('getRegisteredTrackById returns null for unknown track', async (t) => {
   const result = await musicRegistry.getRegisteredTrackById('nonexistent', { registryPath, libraryDir });
   assert.equal(result, null);
 });
+
+test('serializes concurrent registrations on the same registry path without corruption', async (t) => {
+  const dir = tempDir(t);
+  const registryPath = path.join(dir, 'registry.json');
+  const libraryDir = path.join(dir, 'library');
+
+  const createTrack = async (filename, freq) => {
+    const trackDir = path.join(libraryDir, path.dirname(filename));
+    fs.mkdirSync(trackDir, { recursive: true });
+    const trackPath = path.join(libraryDir, filename);
+    await runProcess(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', `sine=frequency=${freq}:sample_rate=44100`,
+      '-t', '18',
+      '-c:a', 'libmp3lame', '-b:a', '96k',
+      '-y', trackPath
+    ], { timeoutMs: 30_000 });
+    return trackPath;
+  };
+
+  await createTrack('test/track-c1.mp3', 440);
+  await createTrack('test/track-c2.mp3', 880);
+  await createTrack('test/track-c3.mp3', 1320);
+
+  const musicRegistry = require('../src/musicRegistry');
+
+  const reg1 = musicRegistry.registerMusicTrack(
+    baseRegistration({ id: 'concurrent-1', filename: 'test/track-c1.mp3' }),
+    { registryPath, libraryDir }
+  );
+  const reg2 = musicRegistry.registerMusicTrack(
+    baseRegistration({ id: 'concurrent-2', filename: 'test/track-c2.mp3' }),
+    { registryPath, libraryDir }
+  );
+  const reg3 = musicRegistry.registerMusicTrack(
+    baseRegistration({ id: 'concurrent-3', filename: 'test/track-c3.mp3' }),
+    { registryPath, libraryDir }
+  );
+
+  const results = await Promise.all([reg1, reg2, reg3]);
+  assert.equal(results.length, 3);
+
+  const persisted = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+  assert.equal(persisted.tracks.length, 3);
+  const ids = persisted.tracks.map((tr) => tr.id).sort();
+  assert.deepEqual(ids, ['concurrent-1', 'concurrent-2', 'concurrent-3']);
+});
+
+test('fails closed with INVALID_MUSIC_REGISTRY on malformed JSON', async (t) => {
+  const dir = tempDir(t);
+  const registryPath = path.join(dir, 'registry.json');
+  const libraryDir = path.join(dir, 'library');
+  fs.writeFileSync(registryPath, '{ malformed json... }');
+
+  const musicRegistry = require('../src/musicRegistry');
+  await assert.rejects(
+    () => musicRegistry.loadRegisteredMusic({ registryPath, libraryDir }),
+    (error) => error.code === 'INVALID_MUSIC_REGISTRY'
+  );
+});
+
+test('fails closed with INVALID_MUSIC_REGISTRY on invalid schema or malformed track records', async (t) => {
+  const dir = tempDir(t);
+  const registryPath = path.join(dir, 'registry.json');
+  const libraryDir = path.join(dir, 'library');
+
+  // Wrong version
+  fs.writeFileSync(registryPath, JSON.stringify({ version: 99, tracks: [] }));
+
+  const musicRegistry = require('../src/musicRegistry');
+  await assert.rejects(
+    () => musicRegistry.loadRegisteredMusic({ registryPath, libraryDir }),
+    (error) => error.code === 'INVALID_MUSIC_REGISTRY'
+  );
+
+  // Corrupted track record inside tracks array
+  fs.writeFileSync(registryPath, JSON.stringify({
+    version: 1,
+    tracks: [{ id: 'bad-track' }]
+  }));
+
+  await assert.rejects(
+    () => musicRegistry.loadRegisteredMusic({ registryPath, libraryDir }),
+    (error) => error.code === 'INVALID_MUSIC_REGISTRY'
+  );
+});

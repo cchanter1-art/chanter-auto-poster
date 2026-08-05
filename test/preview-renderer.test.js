@@ -338,3 +338,67 @@ test('cleans up partial output on FFmpeg failure', async (t) => {
 
   assert.equal(fs.existsSync(outputPath), false, 'partial output must be cleaned up');
 });
+
+test('probeVideoOutput enforces measured output contract and rejects violations', async () => {
+  const { probeVideoOutput } = require('../src/previewRenderer');
+
+  const validProbeJson = (overrides = {}) => JSON.stringify({
+    streams: [
+      { codec_type: 'video', width: 1080, height: 1920, codec_name: 'h264', avg_frame_rate: '30/1', duration: '5.000', ...overrides.video },
+      { codec_type: 'audio', codec_name: 'aac', duration: '5.000', ...overrides.audio }
+    ],
+    format: { duration: '5.000' }
+  });
+
+  const mockRun = (jsonStr) => async () => ({ stdout: jsonStr, stderr: '' });
+
+  // Valid probe returns measured values
+  const validRes = await probeVideoOutput('fake.mp4', { runCommand: mockRun(validProbeJson()) });
+  assert.equal(validRes.width, 1080);
+  assert.equal(validRes.height, 1920);
+  assert.equal(validRes.videoCodec, 'h264');
+  assert.equal(validRes.audioCodec, 'aac');
+  assert.equal(validRes.frameRate, 30);
+
+  // Missing video stream
+  await assert.rejects(
+    () => probeVideoOutput('fake.mp4', { runCommand: mockRun(JSON.stringify({ streams: [{ codec_type: 'audio', codec_name: 'aac' }] })) }),
+    (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('No video stream')
+  );
+
+  // Missing audio stream
+  await assert.rejects(
+    () => probeVideoOutput('fake.mp4', { runCommand: mockRun(JSON.stringify({ streams: [{ codec_type: 'video', width: 1080, height: 1920, codec_name: 'h264' }] })) }),
+    (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('No audio stream')
+  );
+
+  // Invalid width
+  await assert.rejects(
+    () => probeVideoOutput('fake.mp4', { runCommand: mockRun(validProbeJson({ video: { width: 720 } })) }),
+    (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('width 720')
+  );
+
+  // Invalid height
+  await assert.rejects(
+    () => probeVideoOutput('fake.mp4', { runCommand: mockRun(validProbeJson({ video: { height: 1080 } })) }),
+    (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('height 1080')
+  );
+
+  // Invalid video codec
+  await assert.rejects(
+    () => probeVideoOutput('fake.mp4', { runCommand: mockRun(validProbeJson({ video: { codec_name: 'hevc' } })) }),
+    (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('hevc')
+  );
+
+  // Invalid audio codec
+  await assert.rejects(
+    () => probeVideoOutput('fake.mp4', { runCommand: mockRun(validProbeJson({ audio: { codec_name: 'mp3' } })) }),
+    (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('mp3')
+  );
+
+  // Invalid frame rate
+  await assert.rejects(
+    () => probeVideoOutput('fake.mp4', { runCommand: mockRun(validProbeJson({ video: { avg_frame_rate: '60/1' } })) }),
+    (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('frame rate 60')
+  );
+});

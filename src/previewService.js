@@ -33,11 +33,33 @@ async function createImageMusicPreview(request, options = {}) {
     throw serviceError(`Track is not render-eligible (status: ${track.rightsStatus})`, 'TRACK_NOT_VERIFIED');
   }
 
+  // Lock 4: Hash selected track immediately BEFORE rendering
+  const preRenderHash = await musicRegistry.computeSha256(track.absolutePath).catch((err) => {
+    if (err.code === 'ENOENT') {
+      throw serviceError(`Track file missing: ${track.absolutePath}`, 'TRACK_FILE_MISSING');
+    }
+    throw err;
+  });
+
+  if (preRenderHash !== track.sha256) {
+    throw serviceError(
+      `Registered track file content hash mismatch before render for track ${track.id}`,
+      'TRACK_HASH_MISMATCH'
+    );
+  }
+
   // Ensure preview and manifest directories exist
   const previewDir = options.previewDir || config.mediaPreview.previewDir;
   const manifestDir = options.manifestDir || config.mediaPreview.manifestDir;
   await fsp.mkdir(previewDir, { recursive: true });
   await fsp.mkdir(manifestDir, { recursive: true });
+
+  // Lock 3: Invoke cleanup with await as a bounded best-effort operation before creating the new preview
+  try {
+    await cleanupExpiredPreviews(options);
+  } catch {
+    /* best-effort */
+  }
 
   const previewId = randomUUID();
   const previewFilename = `preview-${previewId}.mp4`;
@@ -61,6 +83,23 @@ async function createImageMusicPreview(request, options = {}) {
     await fsp.rm(outputPath, { force: true });
     await fsp.rm(manifestPath, { force: true });
     throw error;
+  }
+
+  // Lock 4: Hash selected track immediately AFTER rendering and BEFORE manifest/token acceptance
+  const postRenderHash = await musicRegistry.computeSha256(track.absolutePath).catch((err) => {
+    if (err.code === 'ENOENT') {
+      throw serviceError(`Track file missing post-render: ${track.absolutePath}`, 'TRACK_FILE_MISSING');
+    }
+    throw err;
+  });
+
+  if (postRenderHash !== track.sha256) {
+    await fsp.rm(outputPath, { force: true });
+    await fsp.rm(manifestPath, { force: true });
+    throw serviceError(
+      `Registered track file content hash mismatch after render for track ${track.id}`,
+      'TRACK_HASH_MISMATCH'
+    );
   }
 
   // Build manifest
@@ -191,23 +230,66 @@ function verifyPreviewToken(token, { userId, outputFilename, outputSize } = {}) 
 async function cleanupExpiredPreviews(options = {}) {
   const previewDir = options.previewDir || config.mediaPreview.previewDir;
   const manifestDir = options.manifestDir || config.mediaPreview.manifestDir;
-  const ttlMs = config.mediaPreview.tokenTtlMs;
-  const cutoff = Date.now() - ttlMs;
+  const ttlMs = typeof options.ttlMs === 'number' ? options.ttlMs : config.mediaPreview.tokenTtlMs;
+  const now = typeof options.now === 'number' ? options.now : Date.now();
+  const orphanGraceMs = typeof options.orphanGraceMs === 'number' ? options.orphanGraceMs : 5000;
+  const cutoff = now - ttlMs;
+  const orphanCutoff = now - orphanGraceMs;
 
-  for (const dir of [previewDir, manifestDir]) {
-    let entries = [];
-    try { entries = await fsp.readdir(dir, { withFileTypes: true }); }
-    catch { continue; }
+  const previewIds = new Set();
 
-    await Promise.all(entries
-      .filter((e) => e.isFile() && /^preview-[0-9a-f-]+\.(mp4|json)$/i.test(e.name))
-      .map(async (e) => {
-        const filePath = path.join(dir, e.name);
-        try {
-          const stats = await fsp.stat(filePath);
-          if (stats.mtimeMs < cutoff) await fsp.rm(filePath, { force: true });
-        } catch { /* best-effort */ }
-      }));
+  const scanDir = async (dir) => {
+    try {
+      const entries = await fsp.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const match = entry.name.match(/^preview-([0-9a-f-]+)\.(mp4|json)$/i);
+        if (match) {
+          previewIds.add(match[1]);
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
+  };
+
+  await Promise.all([scanDir(previewDir), scanDir(manifestDir)]);
+
+  for (const previewId of previewIds) {
+    const mp4Path = path.join(previewDir, `preview-${previewId}.mp4`);
+    const manifestPath = path.join(manifestDir, `preview-${previewId}.json`);
+
+    let mp4Stat = null;
+    let manifestStat = null;
+
+    try { mp4Stat = await fsp.stat(mp4Path); } catch { /* missing */ }
+    try { manifestStat = await fsp.stat(manifestPath); } catch { /* missing */ }
+
+    const hasMp4 = !!(mp4Stat && mp4Stat.isFile());
+    const hasManifest = !!(manifestStat && manifestStat.isFile());
+
+    if (!hasMp4 && !hasManifest) continue;
+
+    if (hasMp4 && hasManifest) {
+      // Delete pair if either member is older than cutoff
+      const mp4Expired = mp4Stat.mtimeMs < cutoff;
+      const manifestExpired = manifestStat.mtimeMs < cutoff;
+      if (mp4Expired || manifestExpired) {
+        await Promise.all([
+          fsp.rm(mp4Path, { force: true }).catch(() => {}),
+          fsp.rm(manifestPath, { force: true }).catch(() => {})
+        ]);
+      }
+    } else {
+      // Orphan case: only one member exists. Delete only after grace period
+      const orphanStat = hasMp4 ? mp4Stat : manifestStat;
+      if (orphanStat.mtimeMs < orphanCutoff) {
+        await Promise.all([
+          fsp.rm(mp4Path, { force: true }).catch(() => {}),
+          fsp.rm(manifestPath, { force: true }).catch(() => {})
+        ]);
+      }
+    }
   }
 }
 
