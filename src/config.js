@@ -165,6 +165,20 @@ module.exports = {
       ''
   },
 
+  mediaPreview: {
+    previewDir: path.join(rootDir, 'uploads', 'previews'),
+    manifestDir: path.join(rootDir, 'uploads', 'previews', 'manifests'),
+    tokenTtlMs: Math.max(60_000, Number(process.env.MEDIA_PREVIEW_TOKEN_TTL_MINUTES || 60) * 60_000),
+    fadeSeconds: Math.max(0.1, Number(process.env.MEDIA_PREVIEW_FADE_SECONDS || 0.5)),
+    renderTimeoutMs: Math.max(30_000, Number(process.env.MEDIA_PREVIEW_RENDER_TIMEOUT_MS || 5 * 60_000)),
+    maxUploadBytes: Math.min(25 * 1024 * 1024, Math.max(1024, Number(process.env.MEDIA_PREVIEW_MAX_UPLOAD_BYTES || 25 * 1024 * 1024))),
+    tokenSecret:
+      process.env.MEDIA_PREVIEW_TOKEN_SECRET ||
+      process.env.AUTO_MUSIC_TOKEN_SECRET ||
+      process.env.ADMIN_SESSION_SECRET ||
+      ''
+  },
+
   tiktok: {
     clientKey: process.env.TIKTOK_CLIENT_KEY || '',
     clientSecret: process.env.TIKTOK_CLIENT_SECRET || '',
