@@ -249,14 +249,19 @@ async function loadRegistryFile(filePath) {
     if (
       !track ||
       typeof track !== 'object' ||
-      typeof track.id !== 'string' ||
-      !track.id ||
-      typeof track.sha256 !== 'string' ||
-      !track.sha256 ||
-      typeof track.filename !== 'string' ||
-      !track.filename ||
-      typeof track.rightsStatus !== 'string' ||
-      !track.rightsStatus
+      typeof track.id !== 'string' || !track.id.trim() ||
+      typeof track.sha256 !== 'string' || !/^[0-9a-fA-F]{64}$/.test(track.sha256) ||
+      typeof track.filename !== 'string' || !track.filename.trim() ||
+      typeof track.title !== 'string' || !track.title.trim() ||
+      typeof track.provider !== 'string' || !track.provider.trim() ||
+      typeof track.category !== 'string' || !track.category.trim() ||
+      typeof track.mood !== 'string' || !track.mood.trim() ||
+      typeof track.rightsStatus !== 'string' || !VALID_RIGHTS_STATUSES.has(track.rightsStatus) ||
+      typeof track.licenceEvidenceRef !== 'string' || !track.licenceEvidenceRef.trim() ||
+      !Number.isFinite(Number(track.durationSeconds)) || Number(track.durationSeconds) <= 0 ||
+      !Number.isFinite(Number(track.bpm)) || Number(track.bpm) <= 0 ||
+      !Number.isFinite(Number(track.intensity)) || Number(track.intensity) < 0 || Number(track.intensity) > 1 ||
+      !Array.isArray(track.tags) || track.tags.length === 0 || !track.tags.every((t) => typeof t === 'string' && t.trim())
     ) {
       throw registryError('Invalid stored track record in registry', 'INVALID_MUSIC_REGISTRY');
     }

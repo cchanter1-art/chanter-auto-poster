@@ -332,4 +332,28 @@ test('fails closed with INVALID_MUSIC_REGISTRY on invalid schema or malformed tr
     () => musicRegistry.loadRegisteredMusic({ registryPath, libraryDir }),
     (error) => error.code === 'INVALID_MUSIC_REGISTRY'
   );
+
+  // Stored verified track record missing licenceEvidenceRef
+  fs.writeFileSync(registryPath, JSON.stringify({
+    version: 1,
+    tracks: [{
+      id: 'valid-id',
+      sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      filename: 'test/track.mp3',
+      title: 'Title',
+      provider: 'Provider',
+      category: 'dark',
+      mood: 'futuristic',
+      bpm: 120,
+      intensity: 0.8,
+      tags: ['tag1'],
+      rightsStatus: 'verified',
+      licenceEvidenceRef: '' // missing / empty
+    }]
+  }));
+
+  await assert.rejects(
+    () => musicRegistry.loadRegisteredMusic({ registryPath, libraryDir }),
+    (error) => error.code === 'INVALID_MUSIC_REGISTRY'
+  );
 });

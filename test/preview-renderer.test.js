@@ -396,9 +396,15 @@ test('probeVideoOutput enforces measured output contract and rejects violations'
     (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('mp3')
   );
 
-  // Invalid frame rate
+  // Invalid frame rate (integer)
   await assert.rejects(
     () => probeVideoOutput('fake.mp4', { runCommand: mockRun(validProbeJson({ video: { avg_frame_rate: '60/1' } })) }),
     (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('frame rate 60')
+  );
+
+  // Invalid frame rate (rational 30000/1001 = 29.97 fps)
+  await assert.rejects(
+    () => probeVideoOutput('fake.mp4', { runCommand: mockRun(validProbeJson({ video: { avg_frame_rate: '30000/1001' } })) }),
+    (err) => err.code === 'PREVIEW_PROBE_FAILED' && err.message.includes('frame rate 29.97')
   );
 });

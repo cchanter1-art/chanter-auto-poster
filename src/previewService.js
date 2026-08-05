@@ -85,20 +85,25 @@ async function createImageMusicPreview(request, options = {}) {
     throw error;
   }
 
-  // Lock 4: Hash selected track immediately AFTER rendering and BEFORE manifest/token acceptance
-  const postRenderHash = await musicRegistry.computeSha256(track.absolutePath).catch((err) => {
-    if (err.code === 'ENOENT') {
-      throw serviceError(`Track file missing post-render: ${track.absolutePath}`, 'TRACK_FILE_MISSING');
+  // Lock 4 & Residual Fix 3: Hash selected track immediately AFTER rendering and BEFORE manifest/token acceptance
+  try {
+    const postRenderHash = await musicRegistry.computeSha256(track.absolutePath);
+    if (postRenderHash !== track.sha256) {
+      throw serviceError(
+        `Registered track file content hash mismatch after render for track ${track.id}`,
+        'TRACK_HASH_MISMATCH'
+      );
     }
-    throw err;
-  });
-
-  if (postRenderHash !== track.sha256) {
+  } catch (postError) {
     await fsp.rm(outputPath, { force: true });
     await fsp.rm(manifestPath, { force: true });
+    if (postError.code && (postError.code.startsWith('PREVIEW_') || postError.code.startsWith('TRACK_'))) {
+      throw postError;
+    }
     throw serviceError(
-      `Registered track file content hash mismatch after render for track ${track.id}`,
-      'TRACK_HASH_MISMATCH'
+      `Registered track verification failed post-render: ${postError.message}`,
+      'TRACK_HASH_MISMATCH',
+      postError
     );
   }
 

@@ -426,3 +426,80 @@ test('cleanup removes pair as one unit when either member is expired (mismatched
   assert.equal(fs.existsSync(mp4Path), false, 'expired MP4 of pair must be deleted');
   assert.equal(fs.existsSync(manifestPath), false, 'manifest of pair must be deleted as one unit');
 });
+
+test('cleans generated artifacts when post-render track hashing fails', async (t) => {
+  const dir = tempDir(t);
+  const previewDir = path.join(dir, 'previews');
+  const manifestDir = path.join(previewDir, 'manifests');
+  const imagePath = await createTestImage(dir, 'post-render-hash-failure.png');
+  const { registryPath, libraryDir } = await setupRegisteredTrack(dir);
+
+  const originalPreviewDir = config.mediaPreview.previewDir;
+  const originalManifestDir = config.mediaPreview.manifestDir;
+
+  config.mediaPreview.previewDir = previewDir;
+  config.mediaPreview.manifestDir = manifestDir;
+
+  t.after(() => {
+    config.mediaPreview.previewDir = originalPreviewDir;
+    config.mediaPreview.manifestDir = originalManifestDir;
+  });
+
+  const musicRegistry = require('../src/musicRegistry');
+  const previewService = require('../src/previewService');
+
+  const originalComputeSha256 = musicRegistry.computeSha256;
+  let hashCallCount = 0;
+
+  musicRegistry.computeSha256 = async (...args) => {
+    hashCallCount += 1;
+
+    if (hashCallCount === 2) {
+      const error = new Error('simulated post-render hash read failure');
+      error.code = 'ENOENT';
+      throw error;
+    }
+
+    return originalComputeSha256(...args);
+  };
+
+  t.after(() => {
+    musicRegistry.computeSha256 = originalComputeSha256;
+  });
+
+  await assert.rejects(
+    () => previewService.createImageMusicPreview({
+      userId: 'post-hash-cleanup-user',
+      imagePath,
+      originalName: 'post-render-hash-failure.png',
+      originalSize: fs.statSync(imagePath).size,
+      durationSeconds: 5,
+      trackId: 'service-test-track',
+      segmentStartSeconds: 0,
+      focalX: 0.5,
+      focalY: 0.5
+    }, {
+      registryPath,
+      libraryDir,
+      previewDir,
+      manifestDir
+    }),
+    (error) =>
+      error.message.includes('Registered track verification failed post-render') &&
+      error.cause &&
+      error.cause.message === 'simulated post-render hash read failure'
+  );
+
+  assert.equal(hashCallCount, 2, 'track must be hashed before and after rendering');
+
+  const previewFiles = fs.existsSync(previewDir)
+    ? fs.readdirSync(previewDir).filter((file) => file.endsWith('.mp4'))
+    : [];
+
+  const manifestFiles = fs.existsSync(manifestDir)
+    ? fs.readdirSync(manifestDir).filter((file) => file.endsWith('.json'))
+    : [];
+
+  assert.deepEqual(previewFiles, [], 'generated MP4 must be removed');
+  assert.deepEqual(manifestFiles, [], 'generated manifest must be removed');
+});

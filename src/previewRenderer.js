@@ -261,10 +261,10 @@ async function probeVideoOutput(filePath, options = {}) {
     const num = Number(parts[0]);
     const den = Number(parts[1]);
     if (Number.isFinite(num) && Number.isFinite(den) && den > 0) {
-      frameRate = Math.round(num / den);
+      frameRate = num / den;
     }
   } else {
-    frameRate = Math.round(Number(fpsStr) || 0);
+    frameRate = Number(fpsStr) || 0;
   }
 
   if (width !== TARGET_WIDTH) {
@@ -279,7 +279,7 @@ async function probeVideoOutput(filePath, options = {}) {
   if (audioCodec !== 'aac') {
     throw previewError(`Measured audio codec '${audioCodec}' does not match expected 'aac'`, 'PREVIEW_PROBE_FAILED');
   }
-  if (frameRate !== TARGET_FPS) {
+  if (Math.abs(frameRate - TARGET_FPS) > 0.001) {
     throw previewError(`Measured frame rate ${frameRate} does not match expected ${TARGET_FPS}`, 'PREVIEW_PROBE_FAILED');
   }
 
