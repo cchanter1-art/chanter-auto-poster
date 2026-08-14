@@ -1,0 +1,97 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 720
+PlayResY: 1280
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Lyrics,DejaVu Sans,36,&H00FFFFFF,&H00FFFFFF,&H00000000,&H72000000,-1,0,0,0,100,100,0,0,3,0,0,2,54,54,92,1
+Style: Watermark,DejaVu Sans,18,&H72FFFFFF,&H72FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1.4,0,1,1,0,8,28,28,42,1
+
+[Events]
+Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+Dialogue: 0,0:00:00.00,0:03:16.51,Watermark,,0,0,0,,PSYCHO BUSINESS · CHANTER
+Dialogue: 1,0:00:00.35,0:00:02.24,Lyrics,,0,0,0,,Black car, no lights
+Dialogue: 1,0:00:02.24,0:00:04.12,Lyrics,,0,0,0,,Phone dead, deal live
+Dialogue: 1,0:00:04.12,0:00:06.01,Lyrics,,0,0,0,,No sleep, still sharp
+Dialogue: 1,0:00:06.01,0:00:09.31,Lyrics,,0,0,0,,Whole room goes quiet\Nwhen I walk
+Dialogue: 1,0:00:10.66,0:00:13.96,Lyrics,,0,0,0,,I don’t chase names,\NI acquire leverage
+Dialogue: 1,0:00:13.96,0:00:17.73,Lyrics,,0,0,0,,Smile too clean, but\Nthe mind too dangerous
+Dialogue: 1,0:00:17.73,0:00:21.51,Lyrics,,0,0,0,,Numbers on numbers, I\Nstack them in silence
+Dialogue: 1,0:00:21.51,0:00:25.28,Lyrics,,0,0,0,,You call it obsession,\NI call it compliance
+Dialogue: 1,0:00:25.28,0:00:29.05,Lyrics,,0,0,0,,Three missed calls, I\Ndon’t owe no reply
+Dialogue: 1,0:00:29.05,0:00:33.77,Lyrics,,0,0,0,,If it don’t make money,\Nlet the whole thing die
+Dialogue: 1,0:00:33.77,0:00:37.54,Lyrics,,0,0,0,,Suit with a heartbeat\Ncold as the floor
+Dialogue: 1,0:00:37.54,0:00:42.73,Lyrics,,0,0,0,,I came for the building, not\Na seat by the door
+Dialogue: 1,0:00:42.73,0:00:46.03,Lyrics,,0,0,0,,Everybody friendly when the\Ngraph goes green
+Dialogue: 1,0:00:46.03,0:00:49.33,Lyrics,,0,0,0,,Everybody genius when the\Nrisk ain’t seen
+Dialogue: 1,0:00:49.33,0:00:53.10,Lyrics,,0,0,0,,I was in the\Ndark making moves unseen
+Dialogue: 1,0:00:53.10,0:00:56.88,Lyrics,,0,0,0,,Now the same motherfuckers\Nwanna join the team
+Dialogue: 1,0:00:58.23,0:01:00.58,Lyrics,,0,0,0,,No emotion in the contract
+Dialogue: 1,0:01:00.58,0:01:02.94,Lyrics,,0,0,0,,No confusion in the roadmap
+Dialogue: 1,0:01:02.94,0:01:06.71,Lyrics,,0,0,0,,If I said it,\Nthen I own that
+Dialogue: 1,0:01:06.71,0:01:09.07,Lyrics,,0,0,0,,One move — ten doors open
+Dialogue: 1,0:01:10.42,0:01:11.37,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:01:11.37,0:01:12.31,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:01:12.31,0:01:16.08,Lyrics,,0,0,0,,Money on my mind\Nlike a medical condition
+Dialogue: 1,0:01:16.08,0:01:17.02,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:01:17.02,0:01:17.97,Lyrics,,0,0,0,,No permission
+Dialogue: 1,0:01:17.97,0:01:21.74,Lyrics,,0,0,0,,I don’t need applause,\NI need ownership positions
+Dialogue: 1,0:01:21.74,0:01:22.68,Lyrics,,0,0,0,,Cold decisions
+Dialogue: 1,0:01:22.68,0:01:23.63,Lyrics,,0,0,0,,Clean execution
+Dialogue: 1,0:01:23.63,0:01:26.93,Lyrics,,0,0,0,,Turn a little pressure\Ninto global distribution
+Dialogue: 1,0:01:26.93,0:01:27.87,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:01:27.87,0:01:28.81,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:01:28.81,0:01:33.53,Lyrics,,0,0,0,,If the world is a\Nmachine, I want root permissions
+Dialogue: 1,0:01:34.88,0:01:38.18,Lyrics,,0,0,0,,I don’t want fame,\NI want infrastructure
+Dialogue: 1,0:01:38.18,0:01:41.95,Lyrics,,0,0,0,,I don’t want noise,\NI want market structure
+Dialogue: 1,0:01:41.95,0:01:45.73,Lyrics,,0,0,0,,I don’t need twenty\Npeople in the room
+Dialogue: 1,0:01:45.73,0:01:50.44,Lyrics,,0,0,0,,Give me one good system,\Nwatch the whole thing bloom
+Dialogue: 1,0:01:50.44,0:01:54.21,Lyrics,,0,0,0,,Every loss gets logged,\Nevery scar gets priced
+Dialogue: 1,0:01:54.21,0:01:57.04,Lyrics,,0,0,0,,Every bad year turned to enterprise
+Dialogue: 1,0:01:57.04,0:02:01.29,Lyrics,,0,0,0,,I don’t pray for luck,\NI engineer the odds
+Dialogue: 1,0:02:01.29,0:02:04.59,Lyrics,,0,0,0,,Build once, sell twice,\Nautomate the job
+Dialogue: 1,0:02:04.59,0:02:07.42,Lyrics,,0,0,0,,They’re posting quotes, I’m closing gaps
+Dialogue: 1,0:02:07.42,0:02:10.25,Lyrics,,0,0,0,,They’re chasing trends, I’m building maps
+Dialogue: 1,0:02:10.25,0:02:13.08,Lyrics,,0,0,0,,They need attention every fucking day
+Dialogue: 1,0:02:13.08,0:02:16.85,Lyrics,,0,0,0,,I need one machine\Nthat keeps getting paid
+Dialogue: 1,0:02:18.20,0:02:19.14,Lyrics,,0,0,0,,More control
+Dialogue: 1,0:02:19.14,0:02:20.09,Lyrics,,0,0,0,,Less noise
+Dialogue: 1,0:02:20.09,0:02:21.03,Lyrics,,0,0,0,,More assets
+Dialogue: 1,0:02:21.03,0:02:21.97,Lyrics,,0,0,0,,Less choice
+Dialogue: 1,0:02:21.97,0:02:22.92,Lyrics,,0,0,0,,One company
+Dialogue: 1,0:02:22.92,0:02:23.86,Lyrics,,0,0,0,,Many hands
+Dialogue: 1,0:02:23.86,0:02:24.80,Lyrics,,0,0,0,,No panic
+Dialogue: 1,0:02:24.80,0:02:25.75,Lyrics,,0,0,0,,Just plans
+Dialogue: 1,0:02:27.10,0:02:28.51,Lyrics,,0,0,0,,Own the stack
+Dialogue: 1,0:02:28.51,0:02:29.93,Lyrics,,0,0,0,,Own the flow
+Dialogue: 1,0:02:29.93,0:02:31.34,Lyrics,,0,0,0,,Own the data
+Dialogue: 1,0:02:31.34,0:02:32.76,Lyrics,,0,0,0,,Own the growth
+Dialogue: 1,0:02:32.76,0:02:34.17,Lyrics,,0,0,0,,Own the growth
+Dialogue: 1,0:02:34.17,0:02:35.59,Lyrics,,0,0,0,,Cut the drag
+Dialogue: 1,0:02:35.59,0:02:37.00,Lyrics,,0,0,0,,Raise the floor
+Dialogue: 1,0:02:37.00,0:02:37.94,Lyrics,,0,0,0,,One decision
+Dialogue: 1,0:02:37.94,0:02:39.83,Lyrics,,0,0,0,,Makes a hundred more
+Dialogue: 1,0:02:41.18,0:02:42.12,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:02:42.12,0:02:43.07,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:02:43.07,0:02:46.84,Lyrics,,0,0,0,,Money on my mind\Nlike a medical condition
+Dialogue: 1,0:02:46.84,0:02:47.78,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:02:47.78,0:02:48.72,Lyrics,,0,0,0,,Pure precision
+Dialogue: 1,0:02:48.72,0:02:52.03,Lyrics,,0,0,0,,Every little move becomes\Na larger system
+Dialogue: 1,0:02:52.03,0:02:52.97,Lyrics,,0,0,0,,Cold decisions
+Dialogue: 1,0:02:52.97,0:02:53.91,Lyrics,,0,0,0,,Clean execution
+Dialogue: 1,0:02:53.91,0:02:57.21,Lyrics,,0,0,0,,Turn a private obsession\Ninto mass distribution
+Dialogue: 1,0:02:57.21,0:02:58.16,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:02:58.16,0:02:59.10,Lyrics,,0,0,0,,Psycho business
+Dialogue: 1,0:02:59.10,0:03:01.93,Lyrics,,0,0,0,,I don’t wanna run the race—
+Dialogue: 1,0:03:01.93,0:03:04.29,Lyrics,,0,0,0,,I wanna own the system.
+Dialogue: 1,0:03:05.64,0:03:06.58,Lyrics,,0,0,0,,No sleep
+Dialogue: 1,0:03:06.58,0:03:07.52,Lyrics,,0,0,0,,No noise
+Dialogue: 1,0:03:07.52,0:03:08.47,Lyrics,,0,0,0,,No boss
+Dialogue: 1,0:03:08.47,0:03:09.41,Lyrics,,0,0,0,,My choice
+Dialogue: 1,0:03:09.41,0:03:10.82,Lyrics,,0,0,0,,Build it once
+Dialogue: 1,0:03:10.82,0:03:12.24,Lyrics,,0,0,0,,Let it run
+Dialogue: 1,0:03:12.24,0:03:14.60,Lyrics,,0,0,0,,When they finally see it—
+Dialogue: 1,0:03:14.60,0:03:16.01,Lyrics,,0,0,0,,It’s already done.

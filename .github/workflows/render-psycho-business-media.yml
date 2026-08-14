@@ -1,0 +1,59 @@
+name: Render Psycho Business media
+
+on:
+  push:
+    branches:
+      - media-psycho-business-20260814
+    paths:
+      - 'media/psycho-business-20260814/source/**'
+      - '.github/workflows/render-psycho-business-media.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify FFmpeg
+        run: ffmpeg -version
+
+      - name: Fetch Psycho Business source audio
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            'https://res.cloudinary.com/dufqftrpg/video/upload/v1786711975/chanter-auto-poster/uploads/1786711970132-29c7b5b6-90b4-4cef-ad67-cdad17b508e8.mp4' \
+            -o /tmp/psycho-business-source.mp4
+          ffprobe -v error -show_entries format=duration -of default=nw=1 /tmp/psycho-business-source.mp4
+
+      - name: Render lyric video
+        run: |
+          mkdir -p media/psycho-business-20260814
+          ffmpeg -y \
+            -loop 1 -framerate 5 \
+            -i media/psycho-business-20260814/source/cover.jpg \
+            -i /tmp/psycho-business-source.mp4 \
+            -map 0:v:0 -map 1:a:0 \
+            -vf "scale=720:1280:flags=bicubic,ass='media/psycho-business-20260814/source/lyrics.ass'" \
+            -c:v libx264 -preset ultrafast -tune stillimage -crf 28 -pix_fmt yuv420p -r 5 \
+            -c:a aac -b:a 128k -ar 48000 -movflags +faststart -shortest \
+            media/psycho-business-20260814/Psycho_Business_CHANTER_Official_Lyric_Video.mp4
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -show_entries stream=codec_type,codec_name,width,height \
+            -of json \
+            media/psycho-business-20260814/Psycho_Business_CHANTER_Official_Lyric_Video.mp4
+
+      - name: Commit rendered media
+        run: |
+          git config user.name 'chanter-media-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add media/psycho-business-20260814/Psycho_Business_CHANTER_Official_Lyric_Video.mp4
+          if git diff --cached --quiet; then
+            echo 'No rendered-media change.'
+            exit 0
+          fi
+          git commit -m 'media: render Psycho Business lyric video'
+          git push
