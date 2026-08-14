@@ -9,8 +9,9 @@
 // locking stay in the application service and worker exactly as they do
 // for TikTok.
 //
-// Safety policy hard-wired for Part 3:
-//   - privacyStatus is ALWAYS 'private'
+// Safety policy hard-wired here:
+//   - privacyStatus is 'private' unless the job explicitly requested another
+//     visibility AND the deployment authorizes it (config.youtube.privateOnly)
 //   - notifySubscribers is ALWAYS false
 //   - images are never accepted
 //   - no publishAt / native scheduling (the product queue is the scheduler)
@@ -34,7 +35,10 @@ const providers = require('./providers');
 const {
   RECEIPT_METHOD,
   canonicalSha256,
-  sanitizeProviderOperation
+  completionStateForVisibility,
+  providerUploadStatus,
+  sanitizeProviderOperation,
+  sanitizeRequestedVisibility
 } = require('./youtubeProviderOperation');
 const {
   approvedMediaMatches,
@@ -628,7 +632,36 @@ function validateYouTubeMetadata(metadata = {}) {
     return { ok: false, reason: `YouTube description must be at most ${MAX_DESCRIPTION_LENGTH} characters.` };
   }
   if (/[<>]/.test(description)) return { ok: false, reason: 'YouTube descriptions cannot contain the characters < or >.' };
-  return { ok: true, title, description };
+  // An omitted visibility means private. A supplied one must be exactly a
+  // visibility this adapter implements — silently downgrading a typo would
+  // publish something other than what the requester read and approved.
+  const rawVisibility = metadata.privacyStatus === undefined || metadata.privacyStatus === null
+    ? 'private'
+    : String(metadata.privacyStatus).trim().toLowerCase();
+  if (sanitizeRequestedVisibility(rawVisibility) !== rawVisibility) {
+    return { ok: false, reason: 'YouTube visibility must be exactly "private" or "public".' };
+  }
+  return { ok: true, title, description, privacyStatus: rawVisibility };
+}
+
+/**
+ * The deployment-level ceiling on requested visibility. `privateOnly` (on by
+ * default) refuses any request beyond private BEFORE the provider is touched;
+ * turning it off authorizes the public path to exist but never selects it.
+ */
+function visibilityAuthorization(requestedVisibility, configStatus = getYouTubeConfigStatus()) {
+  const requested = sanitizeRequestedVisibility(requestedVisibility);
+  const allowed = Array.isArray(configStatus.allowedVisibilities)
+    ? configStatus.allowedVisibilities
+    : ['private'];
+  if (!allowed.includes(requested)) {
+    return {
+      ok: false,
+      requested,
+      reason: `This deployment authorizes YouTube ${allowed.join('/')} publishing only; a ${requested} upload was blocked.`
+    };
+  }
+  return { ok: true, requested };
 }
 
 /**
@@ -637,8 +670,9 @@ function validateYouTubeMetadata(metadata = {}) {
  *   1. POST /upload/youtube/v3/videos?uploadType=resumable  -> session URL
  *   2. PUT <session URL> with the streamed bytes            -> video resource
  *
- * privacyStatus is forced to 'private' and notifySubscribers to false —
- * callers cannot override either. The result distinguishes:
+ * privacyStatus is whatever validateYouTubeMetadata accepted (private unless
+ * the caller explicitly asked otherwise); notifySubscribers is always false
+ * and callers cannot override it. The result distinguishes:
  *   ok:true                       — Google returned the video resource
  *   ok:false, sessionCreated:false — nothing external happened (retry-safe)
  *   ok:false, definitiveFailure    — Google rejected the upload (no video)
@@ -778,7 +812,7 @@ async function uploadVideo({ accessToken, media, metadata, onSessionCreated, onU
           title: meta.title,
           ...(meta.description ? { description: meta.description } : {})
         },
-        status: { privacyStatus: 'private' }
+        status: { privacyStatus: meta.privacyStatus }
       }),
       signal: requestSignal()
     });
@@ -958,6 +992,9 @@ async function buildProviderStatusReceipt({
     expectedTitle,
     exactTitleMatch: Boolean(status.ok && status.title === expectedTitle),
     artifactExists: Boolean(status.ok),
+    // The visibility this operation was approved for. The recorder proves the
+    // provider's actual privacyStatus against THIS, not against a constant.
+    requestedVisibility: sanitizeRequestedVisibility(operation.requestedVisibility),
     privacyStatus: status.ok ? status.privacyStatus : '',
     uploadStatus: status.ok ? status.uploadStatus : '',
     processingStatus: status.ok ? status.processingStatus : '',
@@ -977,7 +1014,14 @@ function verificationFailure(code, reason, status = null) {
   };
 }
 
-async function verifyUploadedVideo({ accessToken, accountId, videoId, expectedTitle }) {
+async function verifyUploadedVideo({
+  accessToken,
+  accountId,
+  videoId,
+  expectedTitle,
+  expectedPrivacyStatus = 'private'
+}) {
+  const expectedVisibility = sanitizeRequestedVisibility(expectedPrivacyStatus);
   let status = null;
   for (let attempt = 0; attempt < VERIFICATION_ATTEMPTS; attempt += 1) {
     status = await readUploadedVideo(accessToken, videoId);
@@ -997,8 +1041,12 @@ async function verifyUploadedVideo({ accessToken, accountId, videoId, expectedTi
   if (status.channelId !== String(accountId || '').trim()) {
     return verificationFailure('provider_channel_mismatch', 'YouTube read-back returned a different channel.', status);
   }
-  if (status.privacyStatus !== 'private') {
-    return verificationFailure('provider_privacy_mismatch', 'YouTube read-back did not confirm private visibility.', status);
+  if (status.privacyStatus !== expectedVisibility) {
+    return verificationFailure(
+      'provider_privacy_mismatch',
+      `YouTube read-back did not confirm ${expectedVisibility} visibility.`,
+      status
+    );
   }
   if (status.title !== String(expectedTitle || '').trim()) {
     return verificationFailure('provider_title_mismatch', 'YouTube read-back title does not match the submitted proof title.', status);
@@ -1060,11 +1108,6 @@ async function publishScheduledYouTubePost(post) {
   if (!configStatus.configured) {
     return preProviderUploadFailure('YouTube publishing is not configured on this deployment; publishing was blocked.');
   }
-  if (!configStatus.privateOnly) {
-    // Part 3 implements private uploads only. Disabling the safety mode
-    // does not unlock anything — it halts the provider.
-    return preProviderUploadFailure('YOUTUBE_PRIVATE_ONLY is disabled but only private publishing is implemented; publishing was blocked.');
-  }
   const accountId = String(post.accountId || '').trim();
   if (!accountId || accountId === 'legacy') {
     return preProviderUploadFailure('YouTube channel is unassigned for this job; publishing was blocked.');
@@ -1087,6 +1130,23 @@ async function publishScheduledYouTubePost(post) {
   const operation = sanitizeProviderOperation(post.providerOperation);
   if (!operation || operation.queueId !== post.id || operation.accountId !== accountId) {
     return preProviderUploadFailure('The durable YouTube provider operation is missing or does not match this queue job.', 'PROVIDER_OPERATION_IDENTITY_MISMATCH');
+  }
+
+  // Visibility is decided exactly once, here, from two independent sources
+  // that must agree: the durable operation minted at claim time (which hashes
+  // the approved visibility into its id) and the queue record's live provider
+  // metadata. Disagreement means the approved record drifted after the claim,
+  // so nothing is uploaded.
+  const requestedVisibility = operation.requestedVisibility;
+  if (metadataCheck.privacyStatus !== requestedVisibility) {
+    return preProviderUploadFailure(
+      'The requested YouTube visibility does not match the visibility bound to this approved provider operation.',
+      'PROVIDER_OPERATION_IDENTITY_MISMATCH'
+    );
+  }
+  const visibilityGate = visibilityAuthorization(requestedVisibility, configStatus);
+  if (!visibilityGate.ok) {
+    return preProviderUploadFailure(visibilityGate.reason, 'PROVIDER_VISIBILITY_NOT_AUTHORIZED');
   }
 
   const operationInput = {
@@ -1172,6 +1232,7 @@ async function publishScheduledYouTubePost(post) {
       metadata: {
         title: youtubeMeta.title,
         description: youtubeMeta.description,
+        privacyStatus: requestedVisibility,
         mimeType: media.mimeType
       },
       onSessionCreated: async (sessionUrl) => {
@@ -1232,7 +1293,8 @@ async function publishScheduledYouTubePost(post) {
         providerStatusReceiptSha256: receiptResult.receiptSha256
       });
       const verifiedOperation = recordedReceipt.safeOperation;
-      if (!verifiedOperation || verifiedOperation.operationState !== 'completed_private') {
+      const completionState = completionStateForVisibility(requestedVisibility);
+      if (!verifiedOperation || verifiedOperation.operationState !== completionState) {
         return {
           ok: false,
           mode: 'api',
@@ -1245,7 +1307,7 @@ async function publishScheduledYouTubePost(post) {
           failureBoundary: 'provider_read_back',
           providerStatus: verifiedOperation ? verifiedOperation.operationState : 'provider_verification_required',
           response: result.response,
-          reason: 'YouTube read-back did not prove one exact private artifact for the configured channel.'
+          reason: `YouTube read-back did not prove one exact ${requestedVisibility} artifact for the configured channel.`
         };
       }
       const receipt = verifiedOperation.providerStatusReceipt;
@@ -1268,7 +1330,7 @@ async function publishScheduledYouTubePost(post) {
         mode: result.mode,
         response: result.response,
         providerMutationStarted: true,
-        providerStatus: 'uploaded_private',
+        providerStatus: providerUploadStatus(receipt.privacyStatus),
         providerVerification: verification
       };
     }
@@ -1348,7 +1410,7 @@ async function reconcileYouTubeProviderOperation({ userId, postId, accountId, wo
   if (!operation || operation.queueId !== postId || operation.accountId !== accountId) {
     return { classification: 'provider_operation_identity_mismatch' };
   }
-  if (['completed_private', 'contradictory_public', 'provider_missing', 'terminal_failure'].includes(operation.operationState)) {
+  if (['completed_private', 'completed_public', 'contradictory_public', 'provider_missing', 'terminal_failure'].includes(operation.operationState)) {
     return { classification: operation.operationState };
   }
   const operationInput = {

@@ -60,11 +60,14 @@ function deepFreeze(value) {
  * YouTube configuration truth (single source — the adapter re-exports
  * this). `configured` is true only when every piece of a REAL, safe flow
  * exists: OAuth client credentials, the exact redirect URI, an encryption
- * key for token custody, the enable flag, and the Part 3 private-only
- * safety mode. Disabling YOUTUBE_PRIVATE_ONLY deliberately de-configures
- * the provider: no non-private publishing path is implemented, so the
- * provider halts rather than degrade. `missing` reports env var NAMES
- * only, never values.
+ * key for token custody, and the enable flag. `missing` reports env var
+ * NAMES only, never values.
+ *
+ * `privateOnly` is a separate authorization ceiling, not a configuration
+ * requirement: it decides WHICH visibilities a job may request, which is why
+ * it is published as `allowedVisibilities` rather than folded into
+ * `configured`. On (the default) the deployment publishes private only; off,
+ * a job may additionally request public — and must do so explicitly.
  */
 function getYouTubeConfigStatus() {
   const missing = [];
@@ -77,12 +80,18 @@ function getYouTubeConfigStatus() {
   return {
     enabled,
     privateOnly,
-    configured: enabled && privateOnly && missing.length === 0,
+    allowedVisibilities: privateOnly
+      ? Object.freeze(['private'])
+      : Object.freeze(['private', 'public']),
+    configured: enabled && missing.length === 0,
     missing
   };
 }
 
 const YOUTUBE_CONFIGURED = getYouTubeConfigStatus().configured;
+// Whether this deployment authorizes a job to request public visibility at
+// all. A job must still ask for it explicitly; this is only the ceiling.
+const YOUTUBE_PUBLIC_AUTHORIZED = getYouTubeConfigStatus().allowedVisibilities.includes('public');
 
 const DEFINITIONS = deepFreeze({
   [PROVIDER_TIKTOK]: {
@@ -153,9 +162,11 @@ const DEFINITIONS = deepFreeze({
       : IMPLEMENTATION_STATUS.DISABLED,
     authMode: 'oauth2_authorization_code',
     connection: { supported: true, mode: 'oauth', route: '/connect/youtube' },
-    // Declared from actual adapter behavior: resumable private video
-    // upload with subscriber notifications forced off, status lookup via
-    // videos.list (youtube.readonly). Public/unlisted publishing, native
+    // Declared from actual adapter behavior: resumable video upload with
+    // subscriber notifications forced off, status lookup via videos.list
+    // (youtube.readonly). Visibility is private unless a job explicitly
+    // requests public AND the deployment authorizes it, so publicPublishing
+    // reports the deployment's real ceiling. Unlisted publishing, native
     // publishAt scheduling, deletion, analytics, thumbnails, live
     // streaming, and playlists are NOT implemented and fail closed.
     capabilities: {
@@ -172,7 +183,7 @@ const DEFINITIONS = deepFreeze({
       analytics: false,
       approvalRequired: true,
       privateVideoUpload: true,
-      publicPublishing: false,
+      publicPublishing: YOUTUBE_PUBLIC_AUTHORIZED,
       unlistedPublishing: false,
       subscriberNotifications: false,
       nativeScheduledPublish: false,
@@ -180,9 +191,15 @@ const DEFINITIONS = deepFreeze({
       liveStreaming: false,
       playlistManagement: false
     },
-    // Part 3 publishing policy enforced by the adapter on every upload —
-    // callers cannot override these.
-    publishingPolicy: { forcedPrivacyStatus: 'private', notifySubscribers: false },
+    // Publishing policy enforced by the adapter on every upload. The
+    // default visibility applies unless a job explicitly requests another
+    // one AND the deployment authorizes it (getYouTubeConfigStatus().
+    // allowedVisibilities); notifySubscribers can never be overridden.
+    publishingPolicy: {
+      defaultPrivacyStatus: 'private',
+      requestablePrivacyStatuses: ['private', 'public'],
+      notifySubscribers: false
+    },
     metadataRequirements: { titleRequired: true, titleMaxLength: 100, descriptionMaxLength: 5000 },
     mediaValidationPolicy: 'video_only'
   },

@@ -1,0 +1,231 @@
+{
+  "proof": "CHANTER governed public YouTube E2E",
+  "runId": "e2bf0789",
+  "startedAt": "2026-08-13T09:41:49.583Z",
+  "completedAt": "2026-08-13T09:48:10.139Z",
+  "verdict": "PASS",
+  "videoId": "I_G_LaGTW-s",
+  "videoUrl": "https://www.youtube.com/watch?v=I_G_LaGTW-s",
+  "requestedVisibility": "public",
+  "actualVisibility": "public",
+  "channel": {
+    "channelId": "UCFWqip0tBKSDJOCgKTSXiyg",
+    "title": "chanter "
+  },
+  "queueId": "runtime-ed460abc3121634625cf9f83b735eaff73af78a0",
+  "media": {
+    "url": "https://www.chanterr.com/media/creature/creature_13.mp4",
+    "sha256": "01209f806ba899b2962736c2ec6eaab7b6e208687d276cc336db003f8ef6582b",
+    "byteSize": 2323295
+  },
+  "steps": [
+    {
+      "step": "1_governed_mission_executed",
+      "at": "2026-08-13T09:41:55.832Z",
+      "missionId": "graph:yt-public-e2e-e2bf0789:node:autoposter_schedule",
+      "graphId": "yt-public-e2e-e2bf0789",
+      "requestedVisibility": "public",
+      "status": "succeeded",
+      "approvalDecision": {
+        "required": true,
+        "approved": true,
+        "approvedBy": "founder",
+        "authority": {
+          "checkpointId": "checkpoint:graph:yt-public-e2e-e2bf0789:node:autoposter_schedule",
+          "approvalRequestId": "approval:graph:yt-public-e2e-e2bf0789:node:autoposter_schedule",
+          "manifestHash": "04fe67a35ddc342b796dace9b15e091d0850da96643fb017b1595a1aa84ef9e0",
+          "observationHash": "b3b8d8aeb78e65a7cb96a4b38cec476f6262936a709fdabab314622f60da25f3",
+          "bindingHash": "6d91f15c122b5323deaa78cb2a8b2b1c7a7f4d8a586f6670c80f4a16e132bb33",
+          "evidenceHash": "2226166f0d1c972b7e34682662ef89e023098c96eee3af39206f24ccd8249280",
+          "state": "approved"
+        }
+      },
+      "policyDecision": {
+        "allowed": true,
+        "approvalRequired": false,
+        "blocked": false,
+        "reasons": [
+          "Task auto_poster-msrbwui7-2-rmcib98d has cleared its approval gate (status=\"approved\"); 'write' may proceed."
+        ]
+      },
+      "idempotency": {
+        "key": "yt-public-e2e-e2bf0789",
+        "outcome": "first_execution"
+      },
+      "errors": [],
+      "output": {
+        "duplicate": false,
+        "post": {
+          "id": "runtime-ed460abc3121634625cf9f83b735eaff73af78a0",
+          "campaignId": "90e6e9c3-aec3-42eb-b275-854964114b4b",
+          "approvalId": "autoposter-approval:graph:yt-public-e2e-e2bf0789:node:autoposter_schedule",
+          "evidenceBundleId": "autoposter-evidence:yt-public-e2e-e2bf0789",
+          "accountId": "UCFWqip0tBKSDJOCgKTSXiyg",
+          "provider": "youtube",
+          "status": "scheduled",
+          "scheduledAt": "2026-08-13T10:01:49.583Z",
+          "approved": false
+        },
+        "publishing": "blocked_until_human_approval"
+      }
+    },
+    {
+      "step": "2_admin_login",
+      "at": "2026-08-13T09:41:55.929Z",
+      "status": 302,
+      "sessionEstablished": true
+    },
+    {
+      "step": "3_human_website_approval",
+      "at": "2026-08-13T09:41:58.118Z",
+      "postId": "runtime-ed460abc3121634625cf9f83b735eaff73af78a0",
+      "status": 302,
+      "notice": "Approved. It will post at Aug 13, 2026, 1:01 PM."
+    },
+    {
+      "step": "4_status_after_approval",
+      "at": "2026-08-13T09:41:59.241Z",
+      "ok": true,
+      "status": "scheduled",
+      "approved": true,
+      "approvalState": "approved",
+      "approvedBy": "admin:owner",
+      "publishAttemptBudget": 1,
+      "runtimeMissionId": "graph:yt-public-e2e-e2bf0789:node:autoposter_schedule"
+    },
+    {
+      "step": "5_publish_now",
+      "at": "2026-08-13T09:42:08.147Z",
+      "postId": "runtime-ed460abc3121634625cf9f83b735eaff73af78a0",
+      "status": 302,
+      "notice": "Uploaded to YouTube as a private video. Check the status below to confirm."
+    },
+    {
+      "step": "6_governed_status_readback",
+      "at": "2026-08-13T09:48:10.139Z",
+      "ok": true,
+      "status": "posted",
+      "providerStatus": "uploaded_public",
+      "publishId": "I_G_LaGTW-s",
+      "approved": true,
+      "approvedBy": "admin:owner",
+      "claimAttempts": 1,
+      "publishAttemptBudget": 1,
+      "runtimeMissionId": "graph:yt-public-e2e-e2bf0789:node:autoposter_schedule",
+      "providerVerification": {
+        "provider": "youtube",
+        "externalVideoId": "I_G_LaGTW-s",
+        "channelId": "UCFWqip0tBKSDJOCgKTSXiyg",
+        "channelTitle": "chanter",
+        "channelHandle": "@chantercy",
+        "title": "CHANTER governed public E2E proof e2bf0789",
+        "privacyStatus": "public",
+        "uploadStatus": "uploaded",
+        "processingStatus": "processing",
+        "verifiedAt": "2026-08-13T09:42:07.211Z",
+        "uploadMethod": "resumable"
+      },
+      "providerOperation": {
+        "operationState": "completed_public",
+        "requestedVisibility": "public",
+        "providerOperationId": "ytop_f46534e95492409ff1b2a42b226c4795c2bba687a2cd6b203e6914f53c918640",
+        "providerAttemptId": "ytatt_a16773757c94b00131ab8c67cda8efe2d42fdd80f869dc04548b8d4021133351",
+        "mediaSha256": "01209f806ba899b2962736c2ec6eaab7b6e208687d276cc336db003f8ef6582b",
+        "mutationSummary": {
+          "providerSessionInitiationCount": 1,
+          "mediaUploadAttemptCount": 1,
+          "confirmedVideoArtifactCount": 1,
+          "existingResourceUpdateCount": 0,
+          "deleteCount": 0,
+          "reconciliationStatusReadCount": 1
+        },
+        "receipt": {
+          "requestedVisibility": "public",
+          "privacyStatus": "public",
+          "exactTitleMatch": true,
+          "artifactExists": true,
+          "verifiedChannelId": "UCFWqip0tBKSDJOCgKTSXiyg",
+          "authenticatedChannelId": "UCFWqip0tBKSDJOCgKTSXiyg",
+          "verificationMethod": "youtube.videos.list+youtube.channels.list",
+          "verificationTimestamp": "2026-08-13T09:42:07.211Z"
+        }
+      },
+      "lastResult": {
+        "mode": "api",
+        "completedAt": "2026-08-13T09:42:07.478Z",
+        "providerMutationStarted": true
+      }
+    },
+    {
+      "step": "7_independent_provider_readback",
+      "at": "2026-08-13T09:48:10.139Z",
+      "httpStatus": 200,
+      "found": true,
+      "videoId": "I_G_LaGTW-s",
+      "channelId": "UCFWqip0tBKSDJOCgKTSXiyg",
+      "channelTitle": "chanter ",
+      "title": "CHANTER governed public E2E proof e2bf0789",
+      "privacyStatus": "public",
+      "uploadStatus": "processed",
+      "processingStatus": "succeeded",
+      "embeddable": true,
+      "publishedAt": "2026-08-13T09:42:57Z",
+      "url": "https://www.youtube.com/watch?v=I_G_LaGTW-s"
+    },
+    {
+      "step": "8_channel_artifact_audit",
+      "at": "2026-08-13T09:48:10.139Z",
+      "uploadsPlaylistId": "UUFWqip0tBKSDJOCgKTSXiyg",
+      "newestUploads": [
+        {
+          "videoId": "I_G_LaGTW-s",
+          "title": "CHANTER governed public E2E proof e2bf0789",
+          "privacyStatus": "public",
+          "publishedAt": "2026-08-13T09:42:57Z"
+        },
+        {
+          "videoId": "JnmpymOtQiI",
+          "title": "Test Song",
+          "privacyStatus": "public",
+          "publishedAt": "2026-08-12T14:30:58Z"
+        },
+        {
+          "videoId": "iWjGAhyckAQ",
+          "title": "CHANTER AutoPoster Private Integration Test",
+          "privacyStatus": "private",
+          "publishedAt": "2026-07-11T07:13:29Z"
+        },
+        {
+          "videoId": "_i0B0zfF-uY",
+          "title": "Man of Eternity",
+          "privacyStatus": "private",
+          "publishedAt": "2026-03-13T14:20:12Z"
+        },
+        {
+          "videoId": "e9eCtl4f5bg",
+          "title": "welcome",
+          "privacyStatus": "private",
+          "publishedAt": "2026-01-18T00:18:46Z"
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "missionSucceeded": true,
+    "missionApprovalPersisted": true,
+    "scheduledDraftUnapproved": true,
+    "humanApprovalRecorded": true,
+    "oneAuthorizedClaim": true,
+    "queueStatusPosted": true,
+    "providerStatusUploadedPublic": true,
+    "operationCompletedPublic": true,
+    "approvedVisibilityPublic": true,
+    "receiptProvesPublic": true,
+    "productReadBackPublic": true,
+    "exactlyOneVideoArtifact": true,
+    "independentReadBackPublic": true,
+    "independentChannelMatches": true,
+    "independentTitleMatches": true,
+    "newestChannelUploadIsThisVideo": true
+  }
+}

@@ -118,6 +118,11 @@ function sanitizePostResult(value) {
   return Object.keys(safe).length > 0 ? safe : null;
 }
 
+// The exact visibilities a YouTube read-back may prove. Kept in sync with
+// youtubeProviderOperation.REQUESTED_VISIBILITIES; this module is a pure
+// mapper and deliberately imports nothing from the provider adapter.
+const VERIFIED_PRIVACY_STATUSES = ['private', 'public'];
+
 function sanitizeProviderVerification(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const provider = String(value.provider || '').trim().toLowerCase();
@@ -129,10 +134,12 @@ function sanitizeProviderVerification(value) {
   const uploadMethod = String(value.uploadMethod || '').trim().toLowerCase();
   if (
     provider !== 'youtube'
+    // Read-back evidence may only claim a visibility this product actually
+    // publishes. Anything else is not a verification we can project.
+    || !VERIFIED_PRIVACY_STATUSES.includes(privacyStatus)
     || !externalVideoId
     || !channelId
     || !title
-    || privacyStatus !== 'private'
     || uploadMethod !== 'resumable'
     || !Number.isFinite(Date.parse(verifiedAt))
   ) return null;
@@ -143,7 +150,7 @@ function sanitizeProviderVerification(value) {
     channelTitle: scrubEvidenceText(value.channelTitle, 200).trim(),
     channelHandle: scrubEvidenceText(value.channelHandle, 200).trim(),
     title,
-    privacyStatus: 'private',
+    privacyStatus,
     uploadStatus: scrubEvidenceText(value.uploadStatus, 120).trim(),
     processingStatus: scrubEvidenceText(value.processingStatus, 120).trim(),
     verifiedAt,
@@ -400,7 +407,11 @@ function postFromDoc(doc) {
           youtube: {
             title: String(data.providerMetadata.youtube.title || ''),
             description: String(data.providerMetadata.youtube.description || ''),
-            privacyStatus: String(data.providerMetadata.youtube.privacyStatus || 'private'),
+            privacyStatus: VERIFIED_PRIVACY_STATUSES.includes(
+              String(data.providerMetadata.youtube.privacyStatus || '').trim().toLowerCase()
+            )
+              ? String(data.providerMetadata.youtube.privacyStatus).trim().toLowerCase()
+              : 'private',
             notifySubscribers: Boolean(data.providerMetadata.youtube.notifySubscribers)
           }
         }

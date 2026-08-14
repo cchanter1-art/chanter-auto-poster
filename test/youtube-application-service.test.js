@@ -170,7 +170,7 @@ test('website and runtime create the same canonical YouTube queue shape', async 
     assert.equal(defaults.provider, 'youtube');
     assert.equal(defaults.accountId, 'UC-chanter');
     assert.equal(defaults.username, 'chanterCy');
-    assert.deepEqual(defaults.providerMetadata, { youtube: { title: 'Launch teaser', description: 'Private test upload' } });
+    assert.deepEqual(defaults.providerMetadata, { youtube: { title: 'Launch teaser', description: 'Private test upload', privacyStatus: 'private' } });
     assert.equal(defaults.scheduledAt, scheduledAt);
     // No token-shaped values may ride along into queue creation.
     const serialized = JSON.stringify(defaults);

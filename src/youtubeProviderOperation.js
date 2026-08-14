@@ -14,6 +14,7 @@ const OPERATION_STATES = new Set([
   'uploading',
   'resumable',
   'completed_private',
+  'completed_public',
   'provider_missing',
   'contradictory_public',
   'outcome_unknown',
@@ -22,19 +23,46 @@ const OPERATION_STATES = new Set([
 
 const TERMINAL_OPERATION_STATES = new Set([
   'completed_private',
+  'completed_public',
   'contradictory_public',
   'provider_missing',
   'terminal_failure'
+]);
+
+// The exact visibilities a job may request. Anything else — including
+// 'unlisted', which no publish path implements — sanitizes down to the
+// least-exposing value, so an unreadable or tampered field can only ever
+// make an upload MORE private than intended, never less.
+const REQUESTED_VISIBILITIES = new Set(['private', 'public']);
+
+// How exposed each provider-reported visibility is. Used to tell a safety
+// contradiction (the provider is more public than what was approved) from a
+// merely unsatisfied completion (the provider is less public than approved).
+const VISIBILITY_EXPOSURE_RANK = new Map([
+  ['private', 0],
+  ['unlisted', 1],
+  ['public', 2]
+]);
+
+// The two states an operation can hold before the provider owns anything.
+// `operation_pending` is the row a worker claim writes; `media_preflighted`
+// adds the bound media identity. Neither has a persisted resumable session
+// locator, so neither is reconcilable — and neither can correspond to a
+// video (see providerOperationAllowsFreshAttempt).
+const PRE_SESSION_OPERATION_STATES = new Set([
+  'operation_pending',
+  'media_preflighted'
 ]);
 
 const OPERATION_TRANSITIONS = new Map([
   ['operation_pending', new Set(['media_preflighted', 'terminal_failure'])],
   ['media_preflighted', new Set(['session_persisted', 'terminal_failure'])],
   ['session_persisted', new Set(['uploading', 'resumable', 'outcome_unknown', 'provider_missing', 'terminal_failure'])],
-  ['uploading', new Set(['uploading', 'resumable', 'completed_private', 'contradictory_public', 'provider_missing', 'outcome_unknown', 'terminal_failure'])],
-  ['resumable', new Set(['uploading', 'resumable', 'completed_private', 'contradictory_public', 'provider_missing', 'outcome_unknown', 'terminal_failure'])],
-  ['outcome_unknown', new Set(['uploading', 'resumable', 'completed_private', 'contradictory_public', 'provider_missing', 'outcome_unknown', 'terminal_failure'])],
+  ['uploading', new Set(['uploading', 'resumable', 'completed_private', 'completed_public', 'contradictory_public', 'provider_missing', 'outcome_unknown', 'terminal_failure'])],
+  ['resumable', new Set(['uploading', 'resumable', 'completed_private', 'completed_public', 'contradictory_public', 'provider_missing', 'outcome_unknown', 'terminal_failure'])],
+  ['outcome_unknown', new Set(['uploading', 'resumable', 'completed_private', 'completed_public', 'contradictory_public', 'provider_missing', 'outcome_unknown', 'terminal_failure'])],
   ['completed_private', new Set()],
+  ['completed_public', new Set()],
   ['contradictory_public', new Set()],
   ['provider_missing', new Set()],
   ['terminal_failure', new Set()]
@@ -82,6 +110,45 @@ function boundedString(value, maxLength) {
   return text;
 }
 
+/**
+ * The one place a requested visibility is decided. Fails closed to 'private'
+ * for anything unrecognized, so no unreadable field can widen exposure.
+ */
+function sanitizeRequestedVisibility(value) {
+  const text = boundedString(value, 32).trim().toLowerCase();
+  return REQUESTED_VISIBILITIES.has(text) ? text : 'private';
+}
+
+/** The terminal success state that proves the approved visibility was met. */
+function completionStateForVisibility(visibility) {
+  return sanitizeRequestedVisibility(visibility) === 'public'
+    ? 'completed_public'
+    : 'completed_private';
+}
+
+/**
+ * The queue-visible provider status for a proven upload. Derived from the
+ * visibility the PROVIDER reported back, never from what was requested, so
+ * the queue can never advertise a visibility YouTube did not confirm.
+ */
+function providerUploadStatus(providerReportedVisibility) {
+  return sanitizeRequestedVisibility(providerReportedVisibility) === 'public'
+    ? 'uploaded_public'
+    : 'uploaded_private';
+}
+
+/**
+ * True when the provider's actual visibility is MORE exposed than what was
+ * approved. That, and only that, is the safety contradiction — a provider
+ * artifact that ended up less exposed than approved is an unmet completion,
+ * not a leak, and stays reconcilable.
+ */
+function visibilityExceedsRequest(actualVisibility, requestedVisibility) {
+  const actual = VISIBILITY_EXPOSURE_RANK.get(boundedString(actualVisibility, 32).trim().toLowerCase());
+  const requested = VISIBILITY_EXPOSURE_RANK.get(sanitizeRequestedVisibility(requestedVisibility));
+  return Number.isInteger(actual) && actual > requested;
+}
+
 function timestampOrNull(value) {
   const text = boundedString(value, 80).trim();
   return text && Number.isFinite(Date.parse(text)) ? text : null;
@@ -107,7 +174,12 @@ function operationIdentityBinding(input) {
     graphId: boundedString(input.graphId, 256).trim(),
     runtimeAction: boundedString(input.runtimeAction, 128).trim(),
     runtimePayloadHash: boundedString(input.runtimePayloadHash, 64).trim(),
-    approvedMediaSha256: boundedString(input.approvedMediaSha256, 64).trim().toLowerCase()
+    approvedMediaSha256: boundedString(input.approvedMediaSha256, 64).trim().toLowerCase(),
+    // The approved visibility is part of WHAT was approved, so it belongs in
+    // the identity the provider operation id hashes. Any drift between the
+    // approved queue record and the operation executing against it mints a
+    // different providerOperationId and fails the identity check closed.
+    requestedVisibility: sanitizeRequestedVisibility(input.requestedVisibility)
   };
 }
 
@@ -275,7 +347,13 @@ function createInitialYouTubeProviderOperation({ queueId, post, attemptNumber, n
     graphId: post.runtimeGraphId,
     runtimeAction: post.runtimeAction,
     runtimePayloadHash: post.runtimePayloadHash,
-    approvedMediaSha256: approvedMedia && approvedMedia.sha256
+    approvedMediaSha256: approvedMedia && approvedMedia.sha256,
+    // Read from the durable approved queue record only. Approval locks the
+    // provider metadata (an approved item cannot change destination), so this
+    // is the visibility a human released, not one the worker chose.
+    requestedVisibility: post.providerMetadata
+      && post.providerMetadata.youtube
+      && post.providerMetadata.youtube.privacyStatus
   });
   if (
     !identity.queueId
@@ -349,6 +427,11 @@ function sanitizeProviderStatusReceipt(value) {
   const canonicalResponseSha256 = boundedString(value.canonicalResponseSha256, 64).trim().toLowerCase();
   const approvedMedia = sanitizeApprovedMediaIdentity(value.approvedMedia);
   const providerProofMode = value.providerProofMode === true;
+  // A receipt must state which visibility it is evidence FOR. Sanitizing
+  // rather than defaulting silently is not enough here: an absent value on a
+  // public operation would read as a private receipt, so the recorder also
+  // cross-checks this against the operation's own approved visibility.
+  const requestedVisibility = sanitizeRequestedVisibility(value.requestedVisibility);
   if (
     provider !== 'youtube'
     || !queueId
@@ -391,6 +474,7 @@ function sanitizeProviderStatusReceipt(value) {
     expectedTitle,
     exactTitleMatch: value.exactTitleMatch,
     artifactExists: value.artifactExists,
+    requestedVisibility,
     privacyStatus: boundedString(value.privacyStatus, 40).trim().toLowerCase(),
     uploadStatus: boundedString(value.uploadStatus, 120).trim(),
     processingStatus: boundedString(value.processingStatus, 120).trim(),
@@ -483,6 +567,7 @@ function sanitizeProviderOperation(value) {
     runtimeAction: boundedString(value.runtimeAction, 128).trim(),
     runtimePayloadHash: boundedString(value.runtimePayloadHash, 64).trim().toLowerCase(),
     approvedMediaSha256: approvedMedia ? approvedMedia.sha256 : null,
+    requestedVisibility: sanitizeRequestedVisibility(value.requestedVisibility),
     providerProofMode,
     approvedMedia,
     bindingSha256: hasMedia && mediaBoundWithinApprovedIdentity ? bindingSha256 : null,
@@ -520,24 +605,71 @@ function sanitizeProviderOperation(value) {
   };
 }
 
+/**
+ * Answers one question for the worker claim: may this queue job open a new
+ * provider attempt, or does its persisted operation still own provider-side
+ * state that must be reconciled instead?
+ *
+ * A fresh attempt is allowed only when the operation proves no video can
+ * exist for it. Two durability barriers make that provable:
+ *
+ *   - a resumable session locator is persisted in the same transaction that
+ *     records `session_initiated`, so any state past `media_preflighted`
+ *     means a session may be reachable and must be reconciled, not replaced;
+ *   - no byte is ever PUT before `upload_put_attempted` is durably recorded
+ *     (putResumableBytes returns without sending when that write fails).
+ *
+ * So a pre-session operation can at worst have left an orphan zero-byte
+ * resumable session at the provider. YouTube creates the video resource on
+ * upload completion, not on session creation, so that orphan expires without
+ * ever becoming a video and a new attempt cannot duplicate one.
+ *
+ * Anything unreadable, tampered with, or past those barriers fails closed.
+ */
+function providerOperationAllowsFreshAttempt(rawOperation) {
+  if (!rawOperation) return true;
+  const operation = sanitizeProviderOperation(rawOperation);
+  if (!operation) return false;
+  if (!PRE_SESSION_OPERATION_STATES.has(operation.operationState)) return false;
+  if (rawOperation.sessionLocatorEnvelope) return false;
+  if (operation.sessionCreatedAt || operation.uploadStartedAt || operation.uploadCompletedAt) return false;
+  if (operation.externalVideoId
+    || operation.providerResponseSha256
+    || operation.providerStatusReceiptSha256
+    || operation.providerStatusReceipt) return false;
+  const summary = operation.mutationSummary;
+  return summary.providerSessionInitiationCount === 0
+    && summary.mediaUploadAttemptCount === 0
+    && summary.confirmedVideoArtifactCount === 0
+    && summary.existingResourceUpdateCount === 0
+    && summary.deleteCount === 0;
+}
+
 module.exports = {
   EVENT_TYPES,
   OPERATION_STATES,
   OPERATION_TRANSITIONS,
+  PRE_SESSION_OPERATION_STATES,
   PROVIDER_OPERATION_EVENT_LIMIT,
   PROVIDER_OPERATION_SCHEMA_VERSION,
   PROVIDER_RECONCILIATION_ATTEMPT_BUDGET,
   RECEIPT_METHOD,
+  REQUESTED_VISIBILITIES,
   TERMINAL_OPERATION_STATES,
   appendProviderOperationEvent,
   canonicalSha256,
   claimReconciliationLease,
+  completionStateForVisibility,
   createInitialYouTubeProviderOperation,
   deriveMutationSummary,
   operationMediaBinding,
+  providerOperationAllowsFreshAttempt,
+  providerUploadStatus,
   reconciliationLeaseAuthorizes,
   sanitizeProviderOperation,
   sanitizeProviderStatusReceipt,
+  sanitizeRequestedVisibility,
   safeEvents,
-  transitionProviderOperation
+  transitionProviderOperation,
+  visibilityExceedsRequest
 };

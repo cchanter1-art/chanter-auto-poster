@@ -18,6 +18,7 @@ const providers = require('./providers');
 const { safeDiagnosticText } = require('./forbiddenMaterial');
 const {
   createInitialYouTubeProviderOperation,
+  providerOperationAllowsFreshAttempt,
   sanitizeProviderOperation
 } = require('./youtubeProviderOperation');
 const {
@@ -458,13 +459,21 @@ async function claimPost(id, { force, workerId, now = new Date() }) {
     const providerId = String(data.provider || data.platform || providers.PROVIDER_TIKTOK)
       .trim()
       .toLowerCase();
-    if (providerId === providers.PROVIDER_YOUTUBE && data.providerOperation) {
+    if (
+      providerId === providers.PROVIDER_YOUTUBE
+      && data.providerOperation
+      && !providerOperationAllowsFreshAttempt(data.providerOperation)
+    ) {
       // The exact provider operation survives every queue-state transition.
-      // No later claim may create another resumable session on this row;
-      // reconciliation must use the already-persisted operation instead.
+      // Once it has reached the provider, no later claim may open another
+      // resumable session on this row; reconciliation must use the
+      // already-persisted operation instead. An operation that never got
+      // that far (a gate failed before the session POST) holds nothing to
+      // reconcile, so a re-approved attempt replaces it rather than being
+      // blocked forever.
       return {
         blocked: PROVIDER_OPERATION_UNRESOLVED,
-        reason: 'This YouTube queue job already owns a provider operation. Reconcile that exact operation instead of creating another session.'
+        reason: 'This YouTube queue job already owns a provider operation that reached the provider. Reconcile that exact operation instead of creating another session.'
       };
     }
 
@@ -629,7 +638,7 @@ async function finalize(id, workerId, result) {
   let providerVerification = sanitizeProviderVerification(result && result.providerVerification);
   if (
     result.ok
-    && result.providerStatus === 'uploaded_private'
+    && ['uploaded_private', 'uploaded_public'].includes(result.providerStatus)
     && (!publishId || !providerVerification)
   ) {
     result = {
@@ -691,7 +700,7 @@ async function finalize(id, workerId, result) {
     if (result.ok) {
       const successDetail = providerId === providers.PROVIDER_YOUTUBE
         ? (publishId
-            ? `YouTube stored the video as private with subscriber notifications disabled (video ${publishId}).`
+            ? `YouTube stored the video as ${(providerVerification && providerVerification.privacyStatus) || 'private'} with subscriber notifications disabled (video ${publishId}).`
             : 'YouTube accepted the upload.')
         : (publishId ? `TikTok accepted the publish (id ${publishId}).` : 'TikTok accepted the publish.');
       const update = {

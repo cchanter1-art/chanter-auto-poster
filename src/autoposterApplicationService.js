@@ -981,12 +981,20 @@ function createAutoPosterApplicationService(dependencies = {}) {
       const rawYouTube = input.youtube && typeof input.youtube === 'object' ? input.youtube : {};
       const checked = validateYouTubeMetadata({
         title: rawYouTube.title,
-        description: rawYouTube.description
+        description: rawYouTube.description,
+        // Absent means private. A caller that wants anything else has to say
+        // so here, in the request that creates the durable queue record a
+        // human will later see and approve.
+        privacyStatus: rawYouTube.privacyStatus
       });
       if (!checked.ok) {
         throw new AutoPosterApplicationError(checked.reason, { code: 'invalid_provider_metadata' });
       }
-      youtubeMetadata = { title: checked.title, description: checked.description };
+      youtubeMetadata = {
+        title: checked.title,
+        description: checked.description,
+        privacyStatus: checked.privacyStatus
+      };
     }
 
     const commercialContext = await resolveCommercialContext(context);
@@ -1202,8 +1210,8 @@ function createAutoPosterApplicationService(dependencies = {}) {
       preparedMedia: input.preparedMedia,
       selfApprove,
       provider,
-      // Bounded provider metadata; storage locks privacyStatus to 'private'
-      // and notifySubscribers to false at write time.
+      // Bounded provider metadata; storage narrows privacyStatus to an exact
+      // implemented visibility and locks notifySubscribers to false at write time.
       providerMetadata: youtubeMetadata ? { youtube: youtubeMetadata } : undefined,
       creationSource: context.source,
       createdBy: context.actorId,
@@ -1826,12 +1834,20 @@ function createAutoPosterApplicationService(dependencies = {}) {
         : {};
       const checked = validateYouTubeMetadata({
         title: raw.title !== undefined ? raw.title : existing.title,
-        description: raw.description !== undefined ? raw.description : existing.description
+        description: raw.description !== undefined ? raw.description : existing.description,
+        // Carried forward, not silently reset: this path only runs on an
+        // unapproved item (approval locks the destination), so the requested
+        // visibility must survive a title edit exactly as the title does.
+        privacyStatus: raw.privacyStatus !== undefined ? raw.privacyStatus : existing.privacyStatus
       });
       if (!checked.ok) {
         throw new AutoPosterApplicationError(checked.reason, { code: 'invalid_provider_metadata' });
       }
-      youtubeMetadata = { title: checked.title, description: checked.description };
+      youtubeMetadata = {
+        title: checked.title,
+        description: checked.description,
+        privacyStatus: checked.privacyStatus
+      };
     }
 
     const view = validated.view;
@@ -2001,7 +2017,7 @@ function createAutoPosterApplicationService(dependencies = {}) {
     }
 
     const commercialContext = await resolveCommercialContext(context);
-    const posts = await storageAdapter.getPosts(context.userId, undefined, undefined);
+    const posts = await storageAdapter.getPosts(context.userId, undefined, commercialContext.workspaceScope);
     const missionMatches = posts.filter((post) =>
       String(post.runtimeMissionId || '') === metadata.missionId
     );
@@ -2036,7 +2052,7 @@ function createAutoPosterApplicationService(dependencies = {}) {
     )) {
       return mismatchResult('payload_mismatch');
     }
-    const exactWorkspaceId = context.rawWorkspaceId || '';
+    const exactWorkspaceId = context.rawWorkspaceId || commercialContext.workspace.workspaceId;
     if (missionMatches.some((post) =>
       String(post.runtimeAction || '') !== metadata.action
       || String(post.workspaceId || '') !== exactWorkspaceId

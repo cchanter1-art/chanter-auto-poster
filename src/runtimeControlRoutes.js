@@ -472,7 +472,14 @@ router.post('/schedule', applicationRoute(async (req, res) => {
         hashtags: body.hashtags,
         soundMode: body.soundMode,
         youtube: provider === 'youtube'
-          ? { title: body.title, description: body.description }
+          ? {
+              title: body.title,
+              description: body.description,
+              // Explicit requested visibility. Omitted means private; the
+              // application service validates the exact allowed values and
+              // the worker enforces the deployment ceiling before uploading.
+              privacyStatus: body.visibility
+            }
           : undefined,
         requestedBy,
         runtimeMissionId: body.missionId,

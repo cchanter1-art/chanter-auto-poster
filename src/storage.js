@@ -29,12 +29,16 @@ const {
   appendProviderOperationEvent,
   canonicalSha256,
   claimReconciliationLease,
+  completionStateForVisibility,
   operationMediaBinding,
+  providerUploadStatus,
   reconciliationLeaseAuthorizes,
   sanitizeProviderOperation,
   sanitizeProviderStatusReceipt,
+  sanitizeRequestedVisibility,
   TERMINAL_OPERATION_STATES,
-  transitionProviderOperation
+  transitionProviderOperation,
+  visibilityExceedsRequest
 } = require('./youtubeProviderOperation');
 const { sanitizeApprovedMediaIdentity } = require('./approvedMediaIdentity');
 const { normalizeSoundMode } = require('./tiktokSoundMode');
@@ -1184,9 +1188,10 @@ function getPublicMediaMimeType(mediaType, mediaUrl) {
 /**
  * Bounded provider-specific queue metadata (Part 3: YouTube only). This is
  * a write-time chokepoint: whatever a caller passes, the stored structure
- * contains exactly these keys, privacyStatus is locked to 'private' and
- * notifySubscribers to false, and no credential-shaped field can ride
- * along. Queue records never carry tokens.
+ * contains exactly these keys, privacyStatus is narrowed to an exact
+ * implemented visibility (defaulting to 'private'), notifySubscribers is
+ * locked to false, and no credential-shaped field can ride along. Queue
+ * records never carry tokens.
  */
 function boundedProviderMetadata(providerId, raw) {
   if (providerId !== 'youtube') return null;
@@ -1198,7 +1203,11 @@ function boundedProviderMetadata(providerId, raw) {
     youtube: {
       title: String(youtube.title || '').trim(),
       description: String(youtube.description || '').trim(),
-      privacyStatus: 'private',
+      // The requested visibility is durable queue truth, decided by the
+      // caller that created the item and frozen once a human approves it
+      // (an approved item cannot change destination). Absent or unreadable
+      // values land on 'private'.
+      privacyStatus: sanitizeRequestedVisibility(youtube.privacyStatus),
       notifySubscribers: false
     }
   };
@@ -2017,10 +2026,10 @@ async function recordYouTubeProviderStatusReceipt(input) {
     if (TERMINAL_OPERATION_STATES.has(operation.operationState)) {
       const safe = sanitizeProviderOperation(operation);
       if (
-        operation.operationState === 'completed_private'
+        ['completed_private', 'completed_public'].includes(operation.operationState)
         && safe?.providerStatusReceiptSha256 === receiptSha256
         && canonicalSha256(safe.providerStatusReceipt) === receiptSha256
-      ) return { outcome: 'completed_private', operation };
+      ) return { outcome: operation.operationState, operation };
       return { outcome: 'conflicting_terminal_completion', operation };
     }
     if (
@@ -2037,17 +2046,25 @@ async function recordYouTubeProviderStatusReceipt(input) {
       || (receipt.externalVideoId || null) !== (operation.externalVideoId || null)
       || receipt.authenticatedChannelId !== receipt.verifiedChannelId
       || canonicalSha256(receipt.approvedMedia) !== canonicalSha256(operation.approvedMedia)
+      // A receipt is evidence for one exact approved visibility. If it claims
+      // a different one than the operation was minted with, it is evidence
+      // about some other intent and must never close this operation.
+      || receipt.requestedVisibility !== sanitizeRequestedVisibility(operation.requestedVisibility)
     ) return { outcome: 'identity_mismatch', operation };
     let operationState = 'outcome_unknown';
     if (!receipt.artifactExists) operationState = 'provider_missing';
     else if (
-      receipt.privacyStatus === 'private'
+      receipt.privacyStatus === receipt.requestedVisibility
       && receipt.exactTitleMatch
       && receipt.verifiedChannelId === receipt.configuredAccountId
       && receipt.authenticatedChannelId === receipt.configuredAccountId
       && !['rejected', 'deleted', 'failed'].includes(receipt.uploadStatus.toLowerCase())
-    ) operationState = 'completed_private';
-    else if (receipt.privacyStatus === 'public' || receipt.privacyStatus === 'unlisted') {
+    ) operationState = completionStateForVisibility(receipt.requestedVisibility);
+    else if (visibilityExceedsRequest(receipt.privacyStatus, receipt.requestedVisibility)) {
+      // The provider is MORE exposed than what was approved. That is the
+      // safety contradiction, whatever the approved visibility was. An
+      // artifact that came back less exposed than approved is an unmet
+      // completion and stays reconcilable as outcome_unknown.
       operationState = 'contradictory_public';
     }
     const at = receipt.verificationTimestamp;
@@ -2057,7 +2074,7 @@ async function recordYouTubeProviderStatusReceipt(input) {
       providerStatusReceiptSha256: receiptSha256,
       externalVideoId: receipt.externalVideoId || operation.externalVideoId || null,
       lastReconciledAt: at,
-      lastOperationErrorCode: operationState === 'completed_private'
+      lastOperationErrorCode: ['completed_private', 'completed_public'].includes(operationState)
         ? null
         : operationState.toUpperCase()
     }, 'provider_status_read', {
@@ -2117,7 +2134,7 @@ async function applyYouTubeProviderReconciliationResult(input) {
     if (!safe || !safe.providerStatusReceipt) return { outcome: 'receipt_missing', operation };
     const receipt = safe.providerStatusReceipt;
     const now = Timestamp.now();
-    if (safe.operationState === 'completed_private') {
+    if (['completed_private', 'completed_public'].includes(safe.operationState)) {
       const verification = {
         provider: 'youtube',
         externalVideoId: receipt.externalVideoId,
@@ -2125,12 +2142,15 @@ async function applyYouTubeProviderReconciliationResult(input) {
         channelTitle: receipt.safeChannelTitle,
         channelHandle: receipt.safeChannelHandle,
         title: receipt.expectedTitle,
-        privacyStatus: 'private',
+        // Provider-read truth, not the request: the completion predicate has
+        // already proven these are the same value.
+        privacyStatus: receipt.privacyStatus,
         uploadStatus: receipt.uploadStatus,
         processingStatus: receipt.processingStatus,
         verifiedAt: receipt.verificationTimestamp,
         uploadMethod: 'resumable'
       };
+      const uploadStatusLabel = providerUploadStatus(receipt.privacyStatus);
       let usageState = data.usageState || '';
       let usageReconciliationRequired = Boolean(data.usageReconciliationRequired);
       if (data.usageLedgerId && data.workspaceId && data.usageCycleId) {
@@ -2149,7 +2169,7 @@ async function applyYouTubeProviderReconciliationResult(input) {
         }
       }
       return {
-        outcome: 'completed_private',
+        outcome: safe.operationState,
         operation,
         queuePatch: {
           status: 'posted',
@@ -2159,7 +2179,7 @@ async function applyYouTubeProviderReconciliationResult(input) {
           lockedAt: null,
           lockedBy: null,
           publishId: receipt.externalVideoId,
-          providerStatus: 'uploaded_private',
+          providerStatus: uploadStatusLabel,
           providerVerification: verification,
           usageState,
           usageReconciliationRequired,
@@ -2167,7 +2187,7 @@ async function applyYouTubeProviderReconciliationResult(input) {
             ok: true,
             mode: 'api_reconciliation',
             completedAt: receipt.verificationTimestamp,
-            providerStatus: 'uploaded_private',
+            providerStatus: uploadStatusLabel,
             response: {
               video_id: receipt.externalVideoId,
               privacy_status: receipt.privacyStatus,
@@ -2176,7 +2196,11 @@ async function applyYouTubeProviderReconciliationResult(input) {
               upload_method: 'resumable'
             }
           },
-          history: appendHistoryEntry(data.history, 'provider_reconciled', 'The persisted YouTube session reconciled to one verified private video.')
+          history: appendHistoryEntry(
+            data.history,
+            'provider_reconciled',
+            `The persisted YouTube session reconciled to one verified ${receipt.privacyStatus} video.`
+          )
         }
       };
     }

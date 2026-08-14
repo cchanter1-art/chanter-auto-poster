@@ -196,7 +196,8 @@ test('safe provider receipt uses a closed allowlist and canonical proof hash', (
   assert.deepEqual(Object.keys(safe).sort(), [
     'approvedMedia', 'artifactExists', 'authenticatedChannelId', 'canonicalResponseSha256', 'configuredAccountId', 'connectedAccountId',
     'exactTitleMatch', 'expectedTitle', 'externalVideoId', 'graphId', 'mediaSha256', 'privacyStatus',
-    'processingStatus', 'provider', 'providerAttemptId', 'providerOperationId', 'providerProofMode', 'queueId', 'runtimeMissionId',
+    'processingStatus', 'provider', 'providerAttemptId', 'providerOperationId', 'providerProofMode', 'queueId',
+    'requestedVisibility', 'runtimeMissionId',
     'safeChannelHandle', 'safeChannelTitle', 'uploadStatus', 'userId', 'verificationMethod',
     'verificationTimestamp', 'verifiedChannelId', 'workspaceId'
   ]);

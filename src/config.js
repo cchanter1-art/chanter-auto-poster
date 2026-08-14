@@ -217,10 +217,12 @@ module.exports = {
     revokeUrl: process.env.YOUTUBE_OAUTH_REVOKE_URL || 'https://oauth2.googleapis.com/revoke',
     apiBaseUrl: (process.env.YOUTUBE_API_BASE_URL || 'https://www.googleapis.com/youtube/v3').replace(/\/+$/, ''),
     uploadBaseUrl: (process.env.YOUTUBE_UPLOAD_BASE_URL || 'https://www.googleapis.com/upload/youtube/v3').replace(/\/+$/, ''),
-    // Part 3 safety policy: uploads are private with subscriber
-    // notifications disabled. privateOnly is an explicit safety mode — the
-    // adapter refuses to run at all if someone turns it off, because no
-    // non-private publishing path is implemented.
+    // Safety policy: subscriber notifications are always disabled, and every
+    // upload is private unless a job EXPLICITLY requests otherwise.
+    // privateOnly is the deployment-level ceiling on that request: while it
+    // is on (the default), a job asking for public visibility is refused
+    // before the provider is touched. Turning it off authorizes the public
+    // path to exist — it never makes any job public by itself.
     privateOnly: envInverseFlag('YOUTUBE_PRIVATE_ONLY', true),
     requestTimeoutMs: Number(process.env.YOUTUBE_REQUEST_TIMEOUT_MS || 30_000),
     uploadTimeoutMs: Number(process.env.YOUTUBE_UPLOAD_TIMEOUT_MS || 15 * 60_000),
