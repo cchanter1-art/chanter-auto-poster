@@ -41,26 +41,46 @@ function normalizeBaseUrl(baseUrl) {
 
 // Rejects anything that is not a plain http(s) origin, so a misconfigured
 // environment fails loudly at read time instead of turning into an odd request.
-function missionGraphsUrl(baseUrl) {
-  const url = new URL(`${normalizeBaseUrl(baseUrl)}${MISSION_GRAPHS_PATH}`);
+//
+// The workspace travels as a query scope Operator applies at its own journal
+// boundary, so what comes back is already confined. Filtering here instead
+// would mean foreign rows had already crossed the process boundary into the
+// customer-facing shell, and one missed filter anywhere downstream would
+// render them.
+function scopedUrl(baseUrl, pathname, workspaceId) {
+  const url = new URL(`${normalizeBaseUrl(baseUrl)}${pathname}`);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('Operator base URL must be an http(s) origin.');
   }
   url.searchParams.set('limit', String(MAX_GRAPHS));
+  const scope = String(workspaceId || '').trim();
+  if (scope) url.searchParams.set('workspaceId', scope);
   return url.toString();
 }
 
-function autoPosterCommandsUrl(baseUrl) {
-  const url = new URL(`${normalizeBaseUrl(baseUrl)}${AUTOPOSTER_COMMANDS_PATH}`);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Operator base URL must be an http(s) origin.');
+function missionGraphsUrl(baseUrl, workspaceId) {
+  return scopedUrl(baseUrl, MISSION_GRAPHS_PATH, workspaceId);
+}
+
+function autoPosterCommandsUrl(baseUrl, workspaceId) {
+  return scopedUrl(baseUrl, AUTOPOSTER_COMMANDS_PATH, workspaceId);
+}
+
+// A customer-facing read of Operator without a verified workspace would be a
+// read of every tenant's work. This provider therefore refuses rather than
+// degrading to an unscoped read: the registry reports the module as degraded
+// and names it, which is a truthful "could not read" — never someone else's
+// mission objective rendered as this workspace's own.
+function requireWorkspaceScope(context) {
+  const workspaceId = String((context && context.workspaceId) || '').trim();
+  if (!workspaceId) {
+    throw new Error('Operator work requires one verified workspace; the platform resolved none.');
   }
-  url.searchParams.set('limit', String(MAX_GRAPHS));
-  return url.toString();
+  return workspaceId;
 }
 
-async function readMissionGraphs({ baseUrl, timeoutMs, fetchImpl }) {
-  const response = await fetchImpl(missionGraphsUrl(baseUrl), {
+async function readMissionGraphs({ baseUrl, timeoutMs, fetchImpl, workspaceId }) {
+  const response = await fetchImpl(missionGraphsUrl(baseUrl, workspaceId), {
     method: READ_ONLY_METHOD,
     headers: { accept: 'application/json' },
     signal: AbortSignal.timeout(timeoutMs)
@@ -84,8 +104,8 @@ async function readMissionGraphs({ baseUrl, timeoutMs, fetchImpl }) {
   return body.graphs;
 }
 
-async function readAutoPosterCommands({ baseUrl, timeoutMs, fetchImpl }) {
-  const response = await fetchImpl(autoPosterCommandsUrl(baseUrl), {
+async function readAutoPosterCommands({ baseUrl, timeoutMs, fetchImpl, workspaceId }) {
+  const response = await fetchImpl(autoPosterCommandsUrl(baseUrl, workspaceId), {
     method: READ_ONLY_METHOD,
     headers: { accept: 'application/json' },
     signal: AbortSignal.timeout(timeoutMs)
@@ -123,11 +143,14 @@ function createOperatorWorkProvider(options = {}) {
 
   return {
     moduleId: MODULE_ID,
-    listWork: async () => {
+    listWork: async (context) => {
+      // Authorization before fan-in: the scope is required before either read
+      // is issued, so an unresolved workspace never reaches Operator at all.
+      const workspaceId = requireWorkspaceScope(context);
       const [graphs, commands] = await Promise.all([
-        readMissionGraphs({ baseUrl, timeoutMs, fetchImpl }),
+        readMissionGraphs({ baseUrl, timeoutMs, fetchImpl, workspaceId }),
         includeAutoPosterCommands
-          ? readAutoPosterCommands({ baseUrl, timeoutMs, fetchImpl })
+          ? readAutoPosterCommands({ baseUrl, timeoutMs, fetchImpl, workspaceId })
           : Promise.resolve([])
       ]);
       return [

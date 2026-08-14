@@ -192,16 +192,23 @@ function createOperatorAutoPosterCommandClient(options = {}) {
     return requireLinkage(body, commandId);
   }
 
-  async function get(commandId) {
+  // The workspace scope travels to Operator, which applies it as a predicate
+  // on its own table. The confinement therefore happens before a foreign row
+  // is ever selected, rather than after it has crossed back into this process.
+  async function get(commandId, { workspaceId = '' } = {}) {
     if (!baseUrl) {
       throw new OperatorCommandClientError('Operator command read model is not configured.', {
         code: 'canonical_execution_unavailable',
         retryable: true
       });
     }
+    const scope = String(workspaceId || '').trim();
     const body = await request(
       `/api/platform/autoposter-commands/${encodeURIComponent(String(commandId || ''))}`,
-      { operation: 'command read' }
+      {
+        operation: 'command read',
+        ...(scope ? { query: { workspaceId: scope } } : {})
+      }
     );
     return requireLinkage(body, commandId, { requireGraph: false });
   }

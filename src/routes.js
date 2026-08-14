@@ -598,7 +598,14 @@ router.get('/auth/tiktok/callback', asyncRoute(async (req, res) => {
   }
 }));
 
-router.get('/disconnect/tiktok', requireAdminPage, asyncRoute(async (req, res) => {
+// Disconnecting is a state change, so it is POST-only. As a GET it was
+// reachable by any link, prefetch, or embedded <img> on any page, and the
+// global csrfOriginCheck middleware exempts safe methods by design — so the
+// one route that most needed origin checking was the one route that never got
+// it. There is deliberately no GET counterpart left: a GET here now 404s,
+// which mutates nothing, rather than being a route that must be trusted to
+// stay harmless.
+router.post('/disconnect/tiktok', requireAdminPage, asyncRoute(async (req, res) => {
   await resolveWebsiteCommercialContext(req);
   const userId = resolveUserId(req);
   const { activeAccount } = await resolveTikTokAccountContext(req, res);
@@ -611,7 +618,7 @@ router.get('/disconnect/tiktok', requireAdminPage, asyncRoute(async (req, res) =
   redirectWithNotice(
     res,
     `${accountLabel(activeAccount)} disconnected. Its jobs and history were preserved.`,
-    safeReturnTo(req.query.returnTo)
+    safeReturnTo((req.body && req.body.returnTo) || req.query.returnTo)
   );
 }));
 
@@ -913,9 +920,10 @@ router.get('/auth/instagram/callback', requireAdminOAuth, asyncRoute(async (req,
   }
 }));
 
-router.get('/disconnect/instagram', requireAdminPage, asyncRoute(async (req, res) => {
+// Same rule for Instagram: retained, but POST-only. See the TikTok route above.
+router.post('/disconnect/instagram', requireAdminPage, asyncRoute(async (req, res) => {
   await storage.clearInstagramAuth();
-  redirectWithNotice(res, 'Instagram disconnected.');
+  redirectWithNotice(res, 'Instagram disconnected.', accountSurfaceReturnTo(req));
 }));
 
 router.get('/api/instagram/health', asyncRoute(async (req, res) => {

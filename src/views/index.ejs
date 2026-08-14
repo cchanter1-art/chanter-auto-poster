@@ -616,7 +616,10 @@
             <a class="btn btn-prompt-evolver" href="#creative-tools" data-creative-tools-link>Creative Tools</a>
             <a class="btn btn-dashboard" href="/private/autoposter/dashboard">Command Center</a>
             <% if (tiktokConfigured) { %>
-              <a class="btn btn-ghost btn-disconnect" href="/disconnect/tiktok">Remove Channel</a>
+              <form class="logout-form" action="/disconnect/tiktok" method="post">
+                <input type="hidden" name="returnTo" value="/private/autoposter/legacy">
+                <button class="btn btn-ghost btn-disconnect" type="submit">Remove Channel</button>
+              </form>
             <% } %>
             <form class="logout-form" action="/logout" method="post"><button class="btn btn-ghost" type="submit">End Session</button></form>
 
@@ -628,7 +631,10 @@
               %>
               <div class="pill <%= igPillClass %>"><span class="dot"></span>Instagram <%= instagramStatus.label %></div>
               <% if (instagramStatus.connected) { %>
-                <a class="btn btn-ghost" href="/disconnect/instagram">Disconnect IG</a>
+                <form class="logout-form" action="/disconnect/instagram" method="post">
+                  <input type="hidden" name="returnTo" value="/private/autoposter/legacy">
+                  <button class="btn btn-ghost" type="submit">Disconnect IG</button>
+                </form>
               <% } else { %>
                 <a class="btn btn-secondary" href="/auth/instagram/start">Connect Instagram</a>
               <% } %>

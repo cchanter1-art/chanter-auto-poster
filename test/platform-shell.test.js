@@ -24,6 +24,23 @@ const platformStatus = require('../src/platformStatus');
 const batchService = require('../src/batchService');
 batchService.listDestinations = async () => ({ destinations: [] });
 
+// A1: the shell resolves ONE verified commercial workspace before it asks any
+// provider for anything. That resolution is a server-side owner-membership
+// check against storage, so it is faked here for the same reason the batch
+// read is — this file is about the surfaces, not about the membership check.
+// The ordering it enforces, and what happens when it fails, are asserted
+// against the real seam in test/platform-workspace-isolation.test.js.
+const SHELL_WORKSPACE_ID = 'workspace-shell-0001';
+const applicationService = require('../src/autoposterApplicationService');
+applicationService.getPlanUsage = async () => ({
+  commercialContext: {
+    userId: 'owner',
+    workspace: { workspaceId: SHELL_WORKSPACE_ID, status: 'active' },
+    workspaceScope: { workspaceId: SHELL_WORKSPACE_ID, allowLegacyOwnerRecords: true }
+  },
+  view: {}
+});
+
 // Auth is destructured inside platformRoutes at require time, so the session
 // gate must be replaced before that require — every route under test still
 // runs behind requireAdminPage/requireAdminApi in production.
@@ -561,13 +578,24 @@ test('platform shell APIs are read-only projections of the same truth', async (t
 });
 
 test('an unreachable store degrades the shell instead of breaking or faking it', async (t) => {
+  // "Unreachable store" means every read from it fails, so both durable reads
+  // are refused here. This used to hold implicitly: listSeries reached storage
+  // through commercial-context resolution, which failed first. Now that the
+  // shell resolves one verified workspace up front and passes it down, that
+  // accident is gone — and relying on it would have left this test asserting
+  // total blackout while only one provider was actually broken.
   const originalListBatches = batchService.listBatches;
+  const originalListSeries = batchService.listSeries;
   batchService.listBatches = async () => {
+    throw new Error('storage offline for test');
+  };
+  batchService.listSeries = async () => {
     throw new Error('storage offline for test');
   };
   const server = await startServer();
   t.after(() => {
     batchService.listBatches = originalListBatches;
+    batchService.listSeries = originalListSeries;
     server.close();
   });
 

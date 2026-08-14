@@ -28,6 +28,21 @@ const { createAutoPosterWorkProvider } = require('../src/platformAutoPosterProvi
 const batchService = require('../src/batchService');
 batchService.listDestinations = async () => ({ destinations: [] });
 
+// A1: the shell resolves ONE verified commercial workspace before any provider
+// is contacted, and the Operator adapter refuses to read without that scope.
+// The membership check itself reads storage, so it is faked here alongside the
+// other durable reads this file already fakes.
+const WORKSPACE_ID = 'workspace-providers-0001';
+const applicationService = require('../src/autoposterApplicationService');
+applicationService.getPlanUsage = async () => ({
+  commercialContext: {
+    userId: 'owner',
+    workspace: { workspaceId: WORKSPACE_ID, status: 'active' },
+    workspaceScope: { workspaceId: WORKSPACE_ID, allowLegacyOwnerRecords: true }
+  },
+  view: {}
+});
+
 const auth = require('../src/auth');
 auth.requireAdminPage = (req, res, next) => next();
 auth.requireAdminApi = (req, res, next) => next();
@@ -223,6 +238,139 @@ test('an unapproved Operator graph waits on an approver and proposes no link', (
   assert.equal(waiting.needsApproval, true);
   assert.equal(waiting.href, '');
   assert.equal(waiting.title, 'Publish the weekly platform readiness digest');
+});
+
+// ── A2: outcome_unknown is reconciliation-required truth ───────────────────
+//
+// The product already records `outcome_unknown` when a provider call was made
+// and its result could not be established. The Platform projection used to let
+// that status fall through to its default branch and render as IDLE — the one
+// reading that is certainly false about a mission that may have had a real
+// external effect.
+
+test('outcome_unknown is a non-idle attention state, never idle or complete', () => {
+  const projected = platformStatus.projectAutoPosterRuntimeJob({
+    id: 'runtime-job-unknown',
+    status: 'outcome_unknown',
+    approved: false,
+    runtimeGraphId: 'graph:outcome-unknown'
+  });
+
+  assert.notEqual(projected.state, WORK_STATE.IDLE);
+  assert.notEqual(projected.state, WORK_STATE.COMPLETED);
+  assert.equal(projected.state, WORK_STATE.FAILED);
+  assert.equal(projected.stateReason, 'Provider outcome unknown; reconciliation required.');
+  // Not an approval: a person cannot approve their way out of an unknown
+  // provider outcome, and counting it as one would inflate the Approvals queue.
+  assert.equal(projected.needsApproval, false);
+  assert.equal(projected.counts.awaiting, 0);
+  // Nor is it a proven failure. The state says "needs attention"; the counts
+  // must not assert something about the provider that is not known.
+  assert.equal(projected.counts.failed, 0);
+});
+
+test('an approved job that ends outcome_unknown still demands reconciliation', () => {
+  const projected = platformStatus.projectAutoPosterRuntimeJob({
+    id: 'runtime-job-unknown-approved',
+    status: 'outcome_unknown',
+    approved: true
+  });
+  assert.equal(projected.state, WORK_STATE.FAILED);
+  assert.equal(projected.needsApproval, false);
+  assert.match(projected.stateReason, /reconciliation required/);
+});
+
+// The linked view is where the truth was most easily lost: three read models
+// describe one command, and severity-first merging let a stale orchestration
+// record outrank the product record that actually knows what happened.
+function linkedGroup(productStatus, { approved = false, commandOverrides = {} } = {}) {
+  const graphId = 'graph:linked-truth';
+  const commandId = `platform-autoposter-${'d'.repeat(40)}`;
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register({
+    moduleId: 'operator',
+    listWork: async () => [platformStatus.projectOperatorAutoPosterCommand({
+      commandId,
+      graphId,
+      lifecycleState: 'completed',
+      productState: 'draft_created',
+      publicationApprovalState: 'human_required',
+      jobIds: ['job-linked-truth'],
+      ...commandOverrides
+    })]
+  });
+  registry.register(createAutoPosterWorkProvider({
+    includeCanonicalRuntimeJobs: true,
+    listBatches: async () => ({ batches: [] }),
+    listQueue: async () => ({
+      items: [{
+        id: 'job-linked-truth',
+        status: productStatus,
+        approved,
+        runtimeGraphId: graphId,
+        commandId
+      }]
+    })
+  }));
+  return registry;
+}
+
+test('a product-native record is authoritative over a stale approval projection', async () => {
+  // The command still says human_required. The job posted. Severity-first
+  // merging kept this in Approvals forever, because WAITING_APPROVAL outranks
+  // COMPLETED — a finished item that never stopped asking for a decision.
+  const collected = await linkedGroup('posted', { approved: true })
+    .collect({ workspaceId: WORKSPACE_ID });
+  assert.equal(collected.items.length, 1, 'the linked group collapses to one row');
+  const [item] = collected.items;
+  assert.equal(item.state, WORK_STATE.COMPLETED);
+  assert.equal(item.needsApproval, false);
+});
+
+test('a failed product record is failed, whatever the command still claims', async () => {
+  const collected = await linkedGroup('failed').collect({ workspaceId: WORKSPACE_ID });
+  assert.equal(collected.items.length, 1);
+  assert.equal(collected.items[0].state, WORK_STATE.FAILED);
+});
+
+test('a linked outcome_unknown product is attention, never idle and never approval', async () => {
+  const collected = await linkedGroup('outcome_unknown').collect({ workspaceId: WORKSPACE_ID });
+  assert.equal(collected.items.length, 1);
+  const [item] = collected.items;
+  assert.notEqual(item.state, WORK_STATE.IDLE);
+  assert.notEqual(item.state, WORK_STATE.COMPLETED);
+  assert.equal(item.state, WORK_STATE.FAILED);
+  assert.equal(item.needsApproval, false);
+  assert.match(item.stateReason, /Provider outcome unknown/);
+  // It must not be counted as a decision waiting on a person.
+  assert.equal(collected.summary.awaitingApproval, 0);
+});
+
+test('with no product record the severity-first orchestration reading still holds', async () => {
+  const registry = platformWorkProviders.createWorkRegistry();
+  const graphId = 'graph:orchestration-only';
+  registry.register({
+    moduleId: 'operator',
+    listWork: async () => [
+      platformStatus.projectOperatorMissionGraph({
+        graphId,
+        status: 'approval_required',
+        nodeCount: 1,
+        objective: 'Orchestration only'
+      }),
+      platformStatus.projectOperatorAutoPosterCommand({
+        commandId: `platform-autoposter-${'9'.repeat(40)}`,
+        graphId,
+        lifecycleState: 'executing',
+        productState: 'not_started',
+        publicationApprovalState: 'human_required'
+      })
+    ]
+  });
+  const collected = await registry.collect({ workspaceId: WORKSPACE_ID });
+  assert.equal(collected.items.length, 1);
+  assert.equal(collected.items[0].state, WORK_STATE.WAITING_APPROVAL);
+  assert.equal(collected.items[0].needsApproval, true);
 });
 
 // ── Mixed-module aggregation ───────────────────────────────────────────────
@@ -646,13 +794,67 @@ test('the Operator provider issues one bounded GET against the read model', asyn
     }
   });
 
-  const items = await provider.listWork();
+  const items = await provider.listWork({ workspaceId: WORKSPACE_ID });
   assert.equal(requests.length, 1, 'exactly one request per read');
   assert.equal(requests[0].options.method, 'GET');
-  assert.equal(requests[0].url, 'http://127.0.0.1:3001/api/mission-graphs?limit=25');
+  assert.equal(
+    requests[0].url,
+    `http://127.0.0.1:3001/api/mission-graphs?limit=25&workspaceId=${WORKSPACE_ID}`
+  );
   assert.ok(requests[0].options.signal, 'the read must be abortable');
   assert.equal(items.length, 2);
   assert.equal(items[0].moduleId, 'operator');
+});
+
+// A1. A customer-facing read of Operator without a verified workspace is a
+// read of every tenant's work, so it must not happen at all — not even as a
+// "best effort" that gets filtered later.
+test('the Operator provider refuses to read without a verified workspace', async () => {
+  const requests = [];
+  const provider = platformOperatorProvider.createOperatorWorkProvider({
+    baseUrl: 'http://127.0.0.1:3001/',
+    includeAutoPosterCommands: true,
+    fetchImpl: async (url) => {
+      requests.push(url);
+      return { ok: true, status: 200, text: async () => JSON.stringify({ graphs: [] }) };
+    }
+  });
+
+  for (const context of [undefined, {}, { workspaceId: '' }, { workspaceId: '   ' }]) {
+    await assert.rejects(
+      provider.listWork(context),
+      /verified workspace/,
+      `an unscoped read must be refused (context: ${JSON.stringify(context)})`
+    );
+  }
+  // Refused BEFORE fan-in: Operator was never contacted.
+  assert.deepEqual(requests, []);
+});
+
+// A degraded Operator is a named module that could not be read. It must never
+// become a silent unscoped read that fills a customer surface with foreign work.
+test('an unscoped Operator read degrades that module and nothing else', async () => {
+  const registry = platformWorkProviders.createWorkRegistry();
+  registry.register(createAutoPosterWorkProvider({
+    listBatches: async () => ({ batches: AUTOPOSTER_BATCHES })
+  }));
+  registry.register(platformOperatorProvider.createOperatorWorkProvider({
+    baseUrl: 'http://127.0.0.1:3001',
+    fetchImpl: async () => {
+      throw new Error('Operator must not be contacted without a workspace scope.');
+    }
+  }));
+
+  const collected = await registry.collect({});
+  assert.equal(collected.error, '', 'a partial read is not a blackout');
+  assert.deepEqual(collected.degraded.map((entry) => entry.moduleId), ['operator']);
+  assert.match(collected.degraded[0].reason, /verified workspace/);
+  assert.ok(collected.items.length > 0, 'AutoPoster work still renders');
+  assert.equal(
+    collected.items.some((item) => item.moduleId === 'operator'),
+    false,
+    'no Operator row may survive an unscoped read'
+  );
 });
 
 test('the canonical feature adds one bounded command GET without adding a mutation', async () => {
@@ -683,12 +885,12 @@ test('the canonical feature adds one bounded command GET without adding a mutati
     }
   });
 
-  const items = await provider.listWork();
+  const items = await provider.listWork({ workspaceId: WORKSPACE_ID });
   assert.deepEqual(
     requests.map((request) => request.url).sort(),
     [
-      'http://127.0.0.1:3001/api/mission-graphs?limit=25',
-      'http://127.0.0.1:3001/api/platform/autoposter-commands?limit=25'
+      `http://127.0.0.1:3001/api/mission-graphs?limit=25&workspaceId=${WORKSPACE_ID}`,
+      `http://127.0.0.1:3001/api/platform/autoposter-commands?limit=25&workspaceId=${WORKSPACE_ID}`
     ]
   );
   assert.ok(requests.every((request) => request.options.method === 'GET'));
@@ -721,16 +923,17 @@ test('an Operator error status, non-JSON body or wrong shape surfaces as a failu
     fetchImpl
   });
 
+  const scope = { workspaceId: WORKSPACE_ID };
   await assert.rejects(
-    build(async () => ({ ok: false, status: 503, text: async () => '' })).listWork(),
+    build(async () => ({ ok: false, status: 503, text: async () => '' })).listWork(scope),
     /answered 503/
   );
   await assert.rejects(
-    build(async () => ({ ok: true, status: 200, text: async () => '<html>nope</html>' })).listWork(),
+    build(async () => ({ ok: true, status: 200, text: async () => '<html>nope</html>' })).listWork(scope),
     /was not JSON/
   );
   await assert.rejects(
-    build(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ missions: [] }) })).listWork(),
+    build(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ missions: [] }) })).listWork(scope),
     /graphs array/
   );
 });

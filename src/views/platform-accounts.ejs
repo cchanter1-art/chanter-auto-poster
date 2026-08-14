@@ -110,7 +110,10 @@
                       <button class="btn btn-quiet" type="submit">Revoke Client Access</button>
                     </form>
                   <% } %>
-                  <a class="danger-link" href="/disconnect/tiktok?returnTo=%2Fplatform%2Fautoposter%2Faccounts">Remove TikTok</a>
+                  <form action="/disconnect/tiktok" method="post">
+                    <input type="hidden" name="returnTo" value="/platform/autoposter/accounts">
+                    <button class="danger-link" type="submit">Remove TikTok</button>
+                  </form>
                 <% } %>
               </section>
 

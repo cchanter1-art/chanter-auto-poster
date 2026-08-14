@@ -161,6 +161,8 @@ function createWorkRegistry() {
     };
   }
 
+  // Severity-first merge, used when the group has no product-native record and
+  // the only truth available is orchestration truth.
   function mergedLinkedState(group) {
     const states = new Set(group.map((item) => item.state));
     if (states.has(platformStatus.WORK_STATE.FAILED)) return platformStatus.WORK_STATE.FAILED;
@@ -171,6 +173,30 @@ function createWorkRegistry() {
     if (states.has(platformStatus.WORK_STATE.PAUSED)) return platformStatus.WORK_STATE.PAUSED;
     if (states.has(platformStatus.WORK_STATE.COMPLETED)) return platformStatus.WORK_STATE.COMPLETED;
     return platformStatus.WORK_STATE.IDLE;
+  }
+
+  // When a product-native runtime record exists it IS the lifecycle. The
+  // command and the graph describe what was asked for and how it was
+  // dispatched; only the queue job knows what actually became of it.
+  //
+  // Severity-first merging was wrong here in both directions. A command still
+  // reading `human_required` after the job posted kept a finished item sitting
+  // in Approvals forever, because WAITING_APPROVAL outranks COMPLETED. And a
+  // job that ended `outcome_unknown` — a real provider call with an
+  // unestablished result — could be masked by a command that still looked
+  // like it was merely waiting.
+  //
+  // With no product record the group is orchestration-only, and the
+  // severity-first reading is still the honest one: the most serious thing any
+  // source reports is the least misleading thing to show.
+  function linkedLifecycle(group, product) {
+    if (!product) {
+      return {
+        state: mergedLinkedState(group),
+        needsApproval: group.some((item) => item.needsApproval)
+      };
+    }
+    return { state: product.state, needsApproval: Boolean(product.needsApproval) };
   }
 
   // One canonical AutoPoster command can be visible from three truthful read
@@ -288,13 +314,14 @@ function createWorkRegistry() {
         || base.stateReason
         || ''
       );
+      const lifecycle = linkedLifecycle(group, product);
       const canonical = {
         ...base,
         workId: canonicalWorkId,
         title: product ? product.title : command.title,
-        state: mergedLinkedState(group),
+        state: lifecycle.state,
         stateReason,
-        needsApproval: group.some((item) => item.needsApproval),
+        needsApproval: lifecycle.needsApproval,
         href: command && canonicalWorkId
           ? `/platform/autoposter/compose/commands/${encodeURIComponent(canonicalWorkId)}`
           : '',

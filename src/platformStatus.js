@@ -122,12 +122,28 @@ function projectAutoPosterBatch(record = {}) {
 // Runtime-created canonical P0 work has no Platform batch record: it is one
 // product-native queue job linked to an Operator graph. Project that durable
 // job directly so the registry can merge it with the command/graph read model.
+// `outcome_unknown` is the product's durable statement that a provider call
+// was made and its result could not be established. It is not idle, not
+// complete, and not safely retryable — reconciliation is required — so it
+// projects onto the same non-idle attention state `failed_recoverable` uses,
+// with a reason that says exactly what is unknown. Leaving it to fall through
+// to IDLE, as it did, rendered a mission with a possible real external effect
+// as "nothing happening", which is the one reading that is certainly false.
+//
+// It is deliberately NOT an approval: a person cannot approve their way out of
+// an unknown provider outcome, and counting it as one would put it in the
+// Approvals queue and inflate the number of decisions waiting on the founder.
+const RUNTIME_JOB_OUTCOME_UNKNOWN = 'outcome_unknown';
+
 function projectAutoPosterRuntimeJob(record = {}) {
   const status = String(record.status || '').trim();
   const approved = Boolean(record.approved);
   let state = WORK_STATE.IDLE;
   let reason = status ? `Queue state: ${status}.` : 'Unknown queue state.';
-  if (status === 'failed') {
+  if (status === RUNTIME_JOB_OUTCOME_UNKNOWN) {
+    state = WORK_STATE.FAILED;
+    reason = 'Provider outcome unknown; reconciliation required.';
+  } else if (status === 'failed') {
     state = WORK_STATE.FAILED;
     reason = 'AutoPoster scheduling or provider preparation failed.';
   } else if (status === 'posted') {
@@ -158,11 +174,18 @@ function projectAutoPosterRuntimeJob(record = {}) {
     counts: {
       total: 1,
       prepared: status === 'pending' ? 0 : 1,
+      // Unknown is not proven failure, so it is not counted as one. The state
+      // above already carries "this needs attention"; claiming a failed item
+      // would assert something about the provider that is not known.
       failed: status === 'failed' ? 1 : 0,
       accepted: approved ? 1 : 0,
-      awaiting: approved || status === 'failed' || status === 'posted' ? 0 : 1
+      awaiting: approved
+        || ['failed', 'posted', RUNTIME_JOB_OUTCOME_UNKNOWN].includes(status)
+        ? 0
+        : 1
     },
-    needsApproval: !approved && !['failed', 'posted'].includes(status),
+    needsApproval: !approved
+      && !['failed', 'posted', RUNTIME_JOB_OUTCOME_UNKNOWN].includes(status),
     href: '',
     createdAt: String(record.createdAt || ''),
     updatedAt: String(record.updatedAt || record.createdAt || ''),

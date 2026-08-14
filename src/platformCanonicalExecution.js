@@ -257,15 +257,22 @@ function createPlatformCanonicalExecution(dependencies = {}) {
     };
   }
 
-  async function getCommand(commandId) {
+  // `workspaceId` is the verified tenant this read is confined to. Operator
+  // applies it as a predicate, so a command owned by another workspace comes
+  // back as the same 404 a never-created command does. A missing scope is
+  // refused with that same 404 rather than falling back to an unscoped read:
+  // an unscoped read here would make any command id readable by anyone who
+  // could guess it.
+  async function getCommand(commandId, workspaceId) {
     const exact = String(commandId || '');
-    if (!COMMAND_ID_PATTERN.test(exact)) {
+    const scope = String(workspaceId || '').trim();
+    if (!COMMAND_ID_PATTERN.test(exact) || !scope) {
       throw new CanonicalExecutionError('Canonical command was not found.', {
         status: 404,
         code: 'not_found'
       });
     }
-    return operatorClient.get(exact);
+    return operatorClient.get(exact, { workspaceId: scope });
   }
 
   return { acceptComposerRequest, getCommand };

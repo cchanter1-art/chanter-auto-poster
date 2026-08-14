@@ -93,18 +93,55 @@ function asyncRoute(handler) {
   };
 }
 
+function requestedWorkspaceId(req) {
+  return String(req.get('x-chanter-workspace-id') || req.query.workspaceId || '').trim();
+}
+
 function websiteContext(req, options = {}) {
   const userId = resolveUserId(req);
+  // A header or query value is a REQUEST for a workspace, never proof of one.
+  // Once resolveVerifiedWorkspace has run, the verified identity is the only
+  // one that reaches any module: carrying the raw value past that point would
+  // let an unverified string decide what a downstream read is scoped to.
+  const verified = req.verifiedWorkspace || null;
   return applicationService.createExecutionContext({
     userId,
     actorId: options.actorId || `admin:${userId}`,
     accountId: options.accountId || '',
     source: 'website',
-    workspaceId: String(req.get('x-chanter-workspace-id') || req.query.workspaceId || '').trim(),
+    workspaceId: verified ? verified.workspaceId : requestedWorkspaceId(req),
+    commercialContext: verified ? verified.commercialContext : null,
     correlationId: req.get('x-request-id') || '',
     approval: options.approval || null,
     idempotency: { key: options.idempotencyKey || '' }
   });
+}
+
+// One verified commercial workspace identity per request.
+//
+// This is the ordering invariant A1 exists to enforce: workspace resolution
+// happens BEFORE any provider is contacted. resolveActiveWorkspace verifies
+// owner membership server-side, so an unknown or foreign workspace throws here
+// — a refusal — instead of degrading into a partial projection later, where a
+// provider failure could leave foreign rows standing in a customer surface.
+async function resolveVerifiedWorkspace(req) {
+  if (req.verifiedWorkspace) return req.verifiedWorkspace;
+  const resolved = await applicationService.getPlanUsage(websiteContext(req));
+  const commercialContext = resolved.commercialContext || null;
+  const workspaceId = String(
+    (commercialContext && commercialContext.workspace && commercialContext.workspace.workspaceId)
+    || ''
+  ).trim();
+  if (!workspaceId) {
+    const error = new Error('A verified workspace could not be resolved for this request.');
+    error.status = 403;
+    error.code = 'workspace_unresolved';
+    throw error;
+  }
+  req.verifiedWorkspace = { workspaceId, commercialContext };
+  req.commercialContext = commercialContext;
+  req.commercialView = resolved.view;
+  return req.verifiedWorkspace;
 }
 
 function approverContext(req) {
@@ -216,6 +253,13 @@ if (operatorWorkProvider) workRegistry.register(operatorWorkProvider);
 // itself look broken, and it must never look healthy either. A module that
 // fails is named; the modules that answered are still reported.
 async function loadPlatformWork(req) {
+  // Deliberately outside the try: an unresolved or unauthorized workspace is
+  // not a degraded module. Letting it fall into the catch below would answer
+  // an unauthorized read with an empty-looking but successful projection,
+  // which is precisely the failure this ordering removes.
+  await resolveVerifiedWorkspace(req);
+  // From here on websiteContext carries the VERIFIED workspace, so every
+  // provider — including the cross-process Operator read — is already scoped.
   try {
     const collected = await workRegistry.collect(websiteContext(req));
     return {
@@ -467,10 +511,19 @@ router.get('/platform/autoposter/compose', requireAdminPage, asyncRoute(async (r
 // product state. Mission graphs, Runtime internals and control actions remain
 // behind Operator.
 router.get('/platform/autoposter/compose/commands/:commandId', requireAdminPage, asyncRoute(async (req, res) => {
+  // Workspace identity is verified before the command is looked up, so a
+  // command belonging to another workspace resolves to the same safe
+  // not-found an unknown command does. A resolution failure is an
+  // authorization refusal and must not be rendered as "temporarily
+  // unavailable", so it stays outside the catch below.
+  const workspace = await resolveVerifiedWorkspace(req);
   let command = null;
   let commandError = '';
   try {
-    const linkage = await canonicalExecution.getCommand(req.params.commandId);
+    const linkage = await canonicalExecution.getCommand(
+      req.params.commandId,
+      workspace.workspaceId
+    );
     command = canonicalExecution.safeCommandView(linkage);
   } catch (error) {
     commandError = safeDiagnosticText(
