@@ -18,8 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify FFmpeg
-        run: ffmpeg -version
+      - name: Install FFmpeg and font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          ffmpeg -version
 
       - name: Fetch Psycho Business source audio
         run: |
