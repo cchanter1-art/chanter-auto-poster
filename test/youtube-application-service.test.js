@@ -300,16 +300,20 @@ test('connected-account preflight emits stable exact typed failures without queu
     }
   ];
 
+  // A4. A foreign account is answered as an unknown one. The old
+  // `account_workspace_mismatch` (403) said "this exists, just not for you",
+  // which is the fact tenant isolation withholds — and enough to enumerate
+  // another workspace's connected accounts one id at a time.
   const workspaceMismatch = buildService({
     account: youtubeAccount({ workspaceId: 'workspace-other' }),
     references: [{ provider: 'youtube', accountId: 'UC-chanter', workspaceId: 'workspace-other' }]
   });
   cases.push({
-    name: 'workspace mismatch',
+    name: 'foreign account is indistinguishable from unknown',
     service: workspaceMismatch.service,
     context: { ...websiteContext, workspaceId: 'workspace-current' },
     input: { provider: 'youtube', accountId: 'UC-chanter' },
-    code: 'account_workspace_mismatch'
+    code: 'unknown_account_id'
   });
 
   for (const scenario of cases) {
@@ -330,6 +334,79 @@ test('connected-account preflight emits stable exact typed failures without queu
     (error) => error.code === 'account_id_case_mismatch'
   );
   assert.equal(ready.calls.addUploadedPosts.length, 0, 'schedule reuses preflight before queue creation');
+});
+
+// A4 — safe-not-found tenant parity.
+//
+// Three requests must be indistinguishable to the caller: an account that
+// never existed, an account that exists only in another workspace, and (for
+// the second one) whatever the account's real state happens to be. Anything
+// that differs — a distinct code, a different status, an extra details field,
+// a workspace name anywhere in the payload — is an existence oracle: probe ids
+// until one answers differently, and you have enumerated another tenant's
+// connected accounts.
+test('a foreign account is byte-identical to an unknown one, and writes nothing', async () => {
+  const currentWorkspace = { ...websiteContext, workspaceId: 'workspace-current' };
+
+  // Exists, but only under workspace-other.
+  const foreign = buildService({
+    account: youtubeAccount({ workspaceId: 'workspace-other' }),
+    references: [{ provider: 'youtube', accountId: 'UC-chanter', workspaceId: 'workspace-other' }]
+  });
+  // Does not exist anywhere.
+  const absent = buildService({ account: null, references: [] });
+
+  const capture = async ({ service }, accountId) => {
+    let captured = null;
+    await assert.rejects(
+      () => service.validateConnectedAccount(currentWorkspace, { provider: 'youtube', accountId }),
+      (error) => {
+        captured = {
+          code: error.code,
+          status: error.status,
+          message: error.message,
+          details: error.details
+        };
+        return true;
+      }
+    );
+    return captured;
+  };
+
+  const foreignAnswer = await capture(foreign, 'UC-chanter');
+  const unknownAnswer = await capture(absent, 'UC-chanter');
+
+  assert.equal(foreignAnswer.code, 'unknown_account_id');
+  assert.deepEqual(foreignAnswer, unknownAnswer, 'a foreign account must be answered as an unknown one');
+  assert.equal(
+    JSON.stringify(foreignAnswer).includes('workspace-other'),
+    false,
+    'no foreign workspace metadata may reach the caller'
+  );
+
+  // And nothing was queued on the way to either refusal.
+  assert.equal(foreign.calls.addUploadedPosts.length, 0);
+  assert.equal(absent.calls.addUploadedPosts.length, 0);
+});
+
+test('a foreign account cannot schedule, and the refusal creates no queue write', async () => {
+  const foreign = buildService({
+    account: youtubeAccount({ workspaceId: 'workspace-other' }),
+    references: [{ provider: 'youtube', accountId: 'UC-chanter', workspaceId: 'workspace-other' }]
+  });
+  await assert.rejects(
+    () => foreign.service.schedulePost(
+      { ...websiteContext, workspaceId: 'workspace-current' },
+      youtubeInput()
+    ),
+    (error) => {
+      assert.equal(error.code, 'unknown_account_id');
+      assert.equal(error.status, 404);
+      assert.equal(JSON.stringify(error).includes('workspace-other'), false);
+      return true;
+    }
+  );
+  assert.equal(foreign.calls.addUploadedPosts.length, 0, 'no queue write may occur');
 });
 
 test('a disconnected channel cannot schedule', async () => {

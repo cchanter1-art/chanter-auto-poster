@@ -468,19 +468,12 @@ function createAutoPosterApplicationService(dependencies = {}) {
       const inWorkspace = references.filter((reference) =>
         referenceMatchesWorkspace(reference, commercialContext)
       );
-      const otherWorkspace = references.find((reference) =>
-        reference.provider === provider
-        && reference.accountId === accountId
-        && !referenceMatchesWorkspace(reference, commercialContext)
-      );
-      if (otherWorkspace) {
-        throw accountValidationError(
-          ACCOUNT_VALIDATION_CODES.WORKSPACE_MISMATCH,
-          'Publishing account is not owned by the requested workspace.',
-          { status: 403 }
-        );
-      }
-
+      // A4. A foreign account is answered exactly as an unknown one, further
+      // down. Reporting `account_workspace_mismatch` here told the caller
+      // "this account exists, just not for you" — which is precisely the fact
+      // tenant isolation exists to withhold, and enough to enumerate another
+      // workspace's connected accounts one id at a time. Nothing about a
+      // foreign reference may influence the answer, so it is not consulted.
       const exactOtherProvider = inWorkspace.find((reference) =>
         reference.accountId === accountId && reference.provider !== provider
       );
@@ -526,11 +519,15 @@ function createAutoPosterApplicationService(dependencies = {}) {
         { status: 404, details: { provider } }
       );
     }
+    // Same rule on the record itself: an account that resolved but belongs to
+    // another workspace is not a different KIND of failure from one that does
+    // not exist. Identical code, status, message, and details — the caller
+    // cannot tell the two apart, which is the whole point.
     if (!referenceMatchesWorkspace(account, commercialContext)) {
       throw accountValidationError(
-        ACCOUNT_VALIDATION_CODES.WORKSPACE_MISMATCH,
-        'Publishing account is not owned by the requested workspace.',
-        { status: 403 }
+        ACCOUNT_VALIDATION_CODES.UNKNOWN,
+        'Publishing account ID was not found for this workspace.',
+        { status: 404, details: { provider } }
       );
     }
     if (view.accountId !== accountId) {
