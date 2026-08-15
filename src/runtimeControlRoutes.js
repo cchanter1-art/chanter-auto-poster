@@ -5,11 +5,15 @@
 // service used by the website and client portal.
 
 const express = require('express');
-const { createHash, timingSafeEqual } = require('crypto');
+const fsp = require('fs/promises');
+const path = require('path');
+const multer = require('multer');
+const { createHash, randomUUID, timingSafeEqual } = require('crypto');
 const config = require('./config');
 const applicationService = require('./autoposterApplicationService');
 const {
   REFERENCE_PREFIX,
+  RUNTIME_INTAKE_ID_PATTERN,
   StagedMediaError,
   createCanonicalStagedMedia
 } = require('./canonicalStagedMedia');
@@ -28,9 +32,33 @@ const CAPTION_SUMMARY_LIMIT = 140;
 // canonical history entries so one response stays bounded no matter how long
 // a job's evidence log grows (the document itself is already capped at 50).
 const STATUS_HISTORY_LIMIT = 20;
-const stagedMedia = createCanonicalStagedMedia({
-  rootDir: config.canonicalExecution.stagedMediaDir,
-  secret: config.canonicalExecution.mediaReferenceSecret
+// The staging primitive reads its configuration once, but the tests (and a
+// misconfigured deploy) steer config at runtime, so resolve it per call.
+function stagedMediaStore() {
+  return createCanonicalStagedMedia({
+    rootDir: config.canonicalExecution.stagedMediaDir,
+    secret: config.canonicalExecution.mediaReferenceSecret
+  });
+}
+const stagedMedia = {
+  materialize: (reference) => stagedMediaStore().materialize(reference),
+  release: (reference) => stagedMediaStore().release(reference)
+};
+
+// Runtime media intake ceiling. The YouTube worker enforces the provider
+// limit separately; this only bounds what one staging request may write.
+const RUNTIME_MEDIA_MAX_BYTES = Number(process.env.RUNTIME_MEDIA_MAX_BYTES || 512 * 1024 * 1024);
+const runtimeMediaUpload = multer({
+  storage: multer.diskStorage({
+    destination: config.uploadsDir,
+    filename: (req, file, callback) => {
+      const extension = path.extname(file.originalname || '').toLowerCase() || '.mp4';
+      callback(null, `runtime-media-${Date.now()}-${randomUUID()}${extension}`);
+    }
+  }),
+  // Media policy lives in the application service, which every other intake
+  // path already shares; multer only bounds size and file count here.
+  limits: { files: 1, fileSize: RUNTIME_MEDIA_MAX_BYTES }
 });
 
 function asyncRoute(handler) {
@@ -389,6 +417,110 @@ router.post('/posts/:id/provider/reconcile', applicationRoute(async (req, res) =
 router.post('/media/validate', applicationRoute(async (req, res) => {
   const validation = applicationService.validateMedia(runtimeContext(req), req.body || {});
   res.json({ ok: true, ...validation });
+}));
+
+// Canonical staged-media intake for bytes that never crossed a customer HTTP
+// session (local media ingress). It mints exactly one signed reference that
+// /schedule already knows how to materialize, so no second upload path,
+// provider client, or public hosting hop is introduced. Staging is not a
+// publication: the reference authenticates metadata and grants no public URL.
+function runtimeMediaFile(req, res, next) {
+  runtimeMediaUpload.single('video')(req, res, (error) => {
+    if (!error) { next(); return; }
+    const tooLarge = error.code === 'LIMIT_FILE_SIZE';
+    fail(
+      res,
+      tooLarge ? 413 : (error.status || 400),
+      tooLarge ? 'staged_media_too_large' : (error.code || 'staged_media_invalid'),
+      tooLarge
+        ? `Runtime staged media exceeds the ${RUNTIME_MEDIA_MAX_BYTES}-byte intake ceiling.`
+        : (error.message || 'The runtime staging upload was rejected.')
+    );
+  });
+}
+
+// Resolved to an outcome first, so the disposable multer copy is always gone
+// before the caller is answered. Otherwise a caller that immediately inspects
+// the uploads directory races our own cleanup.
+async function stageRuntimeMedia(req) {
+  if (!config.canonicalExecution.persistentStagingAcknowledged) {
+    return {
+      status: 503,
+      body: {
+        code: 'staged_media_not_persistent',
+        reason: 'Runtime media staging requires an acknowledged persistent staging root (PLATFORM_CANONICAL_STAGING_PERSISTENT).',
+        retryable: false
+      }
+    };
+  }
+  const intakeId = String((req.body && req.body.intakeId) || '').trim();
+  if (!RUNTIME_INTAKE_ID_PATTERN.test(intakeId)) {
+    return {
+      status: 400,
+      body: {
+        code: 'staged_media_intake_invalid',
+        reason: 'A runtime media intake identity (runtime-media-<40 hex>) is required.'
+      }
+    };
+  }
+  if (!req.file) {
+    return {
+      status: 400,
+      body: { code: 'staged_media_invalid', reason: 'One video file is required under the "video" field.' }
+    };
+  }
+
+  const mediaCheck = applicationService.validateMedia(runtimeContext(req), {
+    fileName: req.file.originalname,
+    mimeType: req.file.mimetype
+  });
+  if (!mediaCheck.valid) {
+    return {
+      status: 400,
+      body: { code: 'staged_media_invalid', reason: mediaCheck.reason }
+    };
+  }
+
+  try {
+    const staged = await stagedMediaStore().stage(intakeId, req.file);
+    return {
+      status: staged.replayed ? 200 : 201,
+      ok: {
+        replayed: staged.replayed,
+        reference: staged.reference,
+        media: {
+          fileName: staged.media.fileName,
+          mimeType: staged.media.mimeType,
+          extension: staged.media.extension,
+          byteSize: staged.media.byteSize,
+          sha256: staged.media.sha256
+        }
+      }
+    };
+  } catch (error) {
+    if (error instanceof StagedMediaError) {
+      return {
+        status: error.status,
+        body: { code: error.code, reason: error.message, retryable: error.retryable }
+      };
+    }
+    throw error;
+  }
+}
+
+router.post('/media/stage', runtimeMediaFile, applicationRoute(async (req, res) => {
+  let outcome;
+  try {
+    outcome = await stageRuntimeMedia(req);
+  } finally {
+    if (req.file && req.file.path) await fsp.rm(req.file.path, { force: true }).catch(() => {});
+  }
+  if (outcome.ok) {
+    res.status(outcome.status).json({ ok: true, ...outcome.ok });
+    return;
+  }
+  const { code, reason, ...extra } = outcome.body;
+  fail(res, outcome.status, code, reason, extra);
 }));
 
 // Read-only recovery contract. It returns zero/one/conflicting exact durable

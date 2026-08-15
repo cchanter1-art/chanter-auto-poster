@@ -13,7 +13,12 @@ const path = require('path');
 const { createHash, createHmac, randomUUID, timingSafeEqual } = require('crypto');
 
 const REFERENCE_PREFIX = 'chanter-autoposter-staged://v1/';
-const COMMAND_ID_PATTERN = /^platform-autoposter-[a-f0-9]{40}$/;
+// Two intake namespaces share one staging store: customer platform commands
+// and the runtime media seam. Both are opaque 40-hex identities derived by
+// their own caller, so neither can name a directory outside the staging root
+// or forge the other's intake.
+const RUNTIME_INTAKE_ID_PATTERN = /^runtime-media-[a-f0-9]{40}$/;
+const COMMAND_ID_PATTERN = /^(?:platform-autoposter|runtime-media)-[a-f0-9]{40}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.webm']);
 const VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
@@ -314,6 +319,7 @@ function createCanonicalStagedMedia(options = {}) {
 
 module.exports = {
   REFERENCE_PREFIX,
+  RUNTIME_INTAKE_ID_PATTERN,
   StagedMediaError,
   createCanonicalStagedMedia
 };
