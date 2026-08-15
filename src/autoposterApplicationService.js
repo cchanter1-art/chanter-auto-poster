@@ -309,6 +309,11 @@ function createAutoPosterApplicationService(dependencies = {}) {
   const batchStaggerPlanner = dependencies.computeBatchStaggerPlan || computeBatchStaggerPlan;
   const commercialAdapter = dependencies.commercialService || commercialService;
   const youtubeAdapter = dependencies.youtube || youtube;
+  // Lazy by default so normal reads/scheduling and unit tests do not load the
+  // scheduler. Only the explicit Runtime public-release operation crosses
+  // this execution boundary.
+  const schedulerAdapter = dependencies.scheduler || null;
+  const getSchedulerAdapter = () => schedulerAdapter || require('./scheduler');
   const injectFailure = typeof dependencies.failureInjector === 'function'
     ? dependencies.failureInjector
     : () => {};
@@ -1493,6 +1498,208 @@ function createAutoPosterApplicationService(dependencies = {}) {
     return { ok: Boolean(post), post };
   }
 
+  async function releaseYouTubePublic(contextInput, input = {}) {
+    const context = createExecutionContext(contextInput);
+    const commercialContext = await resolveCommercialContext(context);
+    if (context.source !== 'runtime' || !context.approval) {
+      throw new AutoPosterApplicationError('Explicit Runtime publication approval is required.', {
+        status: 403,
+        code: 'forbidden'
+      });
+    }
+
+    const postId = String(input.postId || '').trim();
+    const accountId = String(input.accountId || context.accountId || '');
+    const runtimeGraphId = String(input.runtimeGraphId || '');
+    const runtimeMissionId = String(input.runtimeMissionId || '');
+    const expectedTitle = String(input.expectedTitle || '').trim();
+    const approvedBy = String(input.approvedBy || '').trim();
+    if (
+      !postId || !accountId || accountId !== accountId.trim()
+      || !runtimeGraphId || runtimeGraphId !== runtimeGraphId.trim()
+      || !runtimeMissionId || runtimeMissionId !== runtimeMissionId.trim()
+      || !expectedTitle || !approvedBy
+    ) {
+      throw new AutoPosterApplicationError(
+        'Exact post, account, graph, mission, title, and approval identity are required.',
+        { status: 400, code: 'release_precondition_required' }
+      );
+    }
+    if (approvedBy !== context.approval.approvedBy) {
+      throw new AutoPosterApplicationError('Approval identity does not match the Runtime authority context.', {
+        status: 409,
+        code: 'approval_binding_mismatch'
+      });
+    }
+
+    const validated = await validateConnectedAccountForContext(
+      context,
+      { provider: PROVIDER_YOUTUBE, accountId },
+      { requireConnected: true, commercialContext, canonicalOnly: true }
+    );
+
+    const loadExact = async () => {
+      const post = await storageAdapter.getPost(
+        context.userId,
+        postId,
+        accountId,
+        commercialContext.workspaceScope
+      );
+      if (!post) {
+        throw new AutoPosterApplicationError('Post not found for this tenant/account scope.', {
+          status: 404,
+          code: 'not_found'
+        });
+      }
+      const metadata = post.providerMetadata && post.providerMetadata.youtube;
+      if (
+        post.provider !== PROVIDER_YOUTUBE
+        || post.accountId !== accountId
+        || String(post.runtimeGraphId || '') !== runtimeGraphId
+        || String(post.runtimeMissionId || '') !== runtimeMissionId
+        || !metadata
+        || String(metadata.title || '').trim() !== expectedTitle
+      ) {
+        throw new AutoPosterApplicationError('Publication intent no longer matches the durable draft.', {
+          status: 409,
+          code: 'release_binding_mismatch'
+        });
+      }
+      return post;
+    };
+
+    const isExactPublic = (post) => {
+      const verification = post && post.providerVerification;
+      const operation = post && post.providerOperation;
+      return Boolean(
+        post
+        && post.status === 'posted'
+        && post.providerStatus === 'uploaded_public'
+        && post.publishId
+        && verification
+        && verification.externalVideoId === post.publishId
+        && verification.channelId === accountId
+        && verification.title === expectedTitle
+        && verification.privacyStatus === 'public'
+        && operation
+        && operation.operationState === 'completed_public'
+        && operation.requestedVisibility === 'public'
+      );
+    };
+
+    let current = await loadExact();
+    if (isExactPublic(current)) {
+      return {
+        ok: true,
+        outcome: 'already_completed',
+        post: sanitizePostView(current, {
+          advancedEvidence: commercialContext.entitlements.advancedEvidence === true
+        })
+      };
+    }
+
+    const dispatchStarted = Boolean(
+      ['processing', 'outcome_unknown', 'posted'].includes(String(current.status || '').toLowerCase())
+      || Number(current.claimAttempts || 0) > 0
+      || current.lockedAt
+      || current.publishId
+      || current.providerOperation
+      || current.providerVerification
+      || (current.providerStatus && !['scheduled', ''].includes(String(current.providerStatus)))
+    );
+    if (dispatchStarted) {
+      throw new AutoPosterApplicationError(
+        'Provider dispatch has already started; reconcile the existing operation instead of releasing again.',
+        { status: 409, code: 'provider_reconciliation_required' }
+      );
+    }
+
+    const existingYoutube = current.providerMetadata.youtube;
+    if (current.approved) {
+      if (
+        String(current.approvedBy || '') !== approvedBy
+        || existingYoutube.privacyStatus !== 'public'
+      ) {
+        throw new AutoPosterApplicationError('Existing approval does not match this exact public release.', {
+          status: 409,
+          code: 'approval_binding_mismatch'
+        });
+      }
+    } else {
+      const changed = await storageAdapter.changePostDestination(
+        context.userId,
+        postId,
+        {
+          provider: PROVIDER_YOUTUBE,
+          accountId,
+          tiktokOpenId: '',
+          username: current.username || validated.view.username || validated.view.displayName || '',
+          youtube: {
+            title: expectedTitle,
+            description: String(existingYoutube.description || ''),
+            privacyStatus: 'public'
+          }
+        },
+        commercialContext.workspaceScope
+      );
+      if (!changed || changed.outcome !== 'changed') {
+        throw new AutoPosterApplicationError('Public visibility transition was refused.', {
+          status: 409,
+          code: String((changed && changed.outcome) || 'visibility_transition_failed')
+        });
+      }
+
+      const approved = await storageAdapter.approvePost(
+        context.userId,
+        postId,
+        { approvedBy },
+        accountId,
+        commercialContext.workspaceScope
+      );
+      if (!approved) {
+        throw new AutoPosterApplicationError('Publication approval could not be persisted.', {
+          status: 409,
+          code: 'approval_not_persisted'
+        });
+      }
+      current = approved;
+    }
+
+    const scheduler = getSchedulerAdapter();
+    if (!scheduler || typeof scheduler.processPost !== 'function') {
+      throw new AutoPosterApplicationError('Publishing scheduler is unavailable.', {
+        status: 503,
+        code: 'scheduler_unavailable'
+      });
+    }
+    await scheduler.processPost(postId, { force: true });
+
+    const finalPost = await loadExact();
+    if (!isExactPublic(finalPost)) {
+      throw new AutoPosterApplicationError(
+        'Provider execution returned without authoritative exact-public verification.',
+        {
+          status: 409,
+          code: 'release_not_verified',
+          details: {
+            status: String(finalPost.status || ''),
+            providerStatus: String(finalPost.providerStatus || ''),
+            operationState: String(
+              (finalPost.providerOperation && finalPost.providerOperation.operationState) || ''
+            )
+          }
+        }
+      );
+    }
+    return {
+      ok: true,
+      outcome: 'published',
+      post: sanitizePostView(finalPost, {
+        advancedEvidence: commercialContext.entitlements.advancedEvidence === true
+      })
+    };
+  }
+
   async function revokeApproval(contextInput, input = {}) {
     const context = createExecutionContext(contextInput);
     const commercialContext = await resolveCommercialContext(context);
@@ -2219,6 +2426,7 @@ function createAutoPosterApplicationService(dependencies = {}) {
 
   return {
     approvePost,
+    releaseYouTubePublic,
     cancelApprovedPost,
     changePostDestination,
     deleteMarkedPosts,

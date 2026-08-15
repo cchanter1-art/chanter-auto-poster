@@ -988,6 +988,31 @@ function okFetch(graphs) {
   return async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ graphs }) });
 }
 
+function loadRouterWithoutOperator() {
+  const configPath = require.resolve('../src/config');
+  const routesPath = require.resolve('../src/platformRoutes');
+  const operatorPath = require.resolve('../src/platformOperatorProvider');
+  const previousBaseUrl = process.env.OPERATOR_BASE_URL;
+  delete process.env.OPERATOR_BASE_URL;
+  delete require.cache[configPath];
+  delete require.cache[routesPath];
+  delete require.cache[operatorPath];
+
+  const router = require('../src/platformRoutes');
+  return {
+    router,
+    restore() {
+      if (previousBaseUrl === undefined) delete process.env.OPERATOR_BASE_URL;
+      else process.env.OPERATOR_BASE_URL = previousBaseUrl;
+      delete require.cache[configPath];
+      delete require.cache[routesPath];
+      delete require.cache[operatorPath];
+      require('../src/config');
+      require('../src/platformRoutes');
+    }
+  };
+}
+
 test('the shell renders mixed-module work with no module-specific branching', async (t) => {
   const originalListBatches = batchService.listBatches;
   const originalListSeries = batchService.listSeries;
@@ -1162,12 +1187,13 @@ test('with no Operator configured the platform registers AutoPoster alone', asyn
   // Recurring series are a second registered producer. This file fakes the
   // durable reads, so it fakes this one too rather than reaching storage.
   batchService.listSeries = async () => ({ series: [] });
-  const platformRoutes = require('../src/platformRoutes');
-  const server = await startServer(platformRoutes);
+  const loaded = loadRouterWithoutOperator();
+  const server = await startServer(loaded.router);
   t.after(() => {
     batchService.listBatches = originalListBatches;
     batchService.listSeries = originalListSeries;
     server.close();
+    loaded.restore();
   });
 
   const baseUrl = `http://127.0.0.1:${server.address().port}`;

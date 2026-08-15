@@ -15,6 +15,13 @@ process.env.OPENAI_API_KEY = 'test-openai-key';
 process.env.ENABLE_INSTAGRAM = 'false';
 process.env.YOUTUBE_ENABLED = 'false';
 
+// This file's contract is explicitly "no provider is configured". The normal
+// canonical developer shell may legitimately carry OPERATOR_BASE_URL, so clear
+// it before ANY application module can cache src/config. Restore it immediately
+// after platformRoutes has constructed its work registry.
+const previousOperatorBaseUrlForShellTest = process.env.OPERATOR_BASE_URL;
+delete process.env.OPERATOR_BASE_URL;
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const express = require('express');
@@ -62,6 +69,9 @@ firestoreModule.getFirestore = () => {
 };
 
 const platformRoutes = require('../src/platformRoutes');
+
+if (previousOperatorBaseUrlForShellTest === undefined) delete process.env.OPERATOR_BASE_URL;
+else process.env.OPERATOR_BASE_URL = previousOperatorBaseUrlForShellTest;
 
 const { WORK_STATE } = platformStatus;
 

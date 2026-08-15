@@ -91,7 +91,8 @@ function runtimeContext(req, {
   accountId = '',
   actorId = 'agent-runtime',
   idempotencyKey = '',
-  workspaceId = ''
+  workspaceId = '',
+  approvedBy = ''
 } = {}) {
   return applicationService.createExecutionContext({
     userId: req.runtimeUserId,
@@ -100,6 +101,7 @@ function runtimeContext(req, {
     workspaceId: String(workspaceId || req.get('x-chanter-workspace-id') || ''),
     source: 'runtime',
     correlationId: req.get('x-request-id') || req.get('x-correlation-id') || '',
+    ...(approvedBy ? { approval: { approvedBy } } : {}),
     idempotency: { key: idempotencyKey }
   });
 }
@@ -342,6 +344,28 @@ router.get('/posts/:id/status', applicationRoute(async (req, res) => {
     { postId: req.params.id, accountId }
   );
   res.json({ ok: true, post: postStatusView(post) });
+}));
+
+router.post('/posts/:id/release-youtube-public', applicationRoute(async (req, res) => {
+  const body = req.body || {};
+  const accountId = String(body.accountId || '');
+  const workspaceId = String(body.workspaceId || req.get('x-chanter-workspace-id') || '').trim();
+  const runtimeGraphId = String(body.runtimeGraphId || '');
+  const runtimeMissionId = String(body.runtimeMissionId || '');
+  const expectedTitle = String(body.expectedTitle || '').trim();
+  const approvedBy = String(body.approvedBy || '').trim();
+  const result = await applicationService.releaseYouTubePublic(
+    runtimeContext(req, { accountId, workspaceId, actorId: approvedBy, approvedBy }),
+    {
+      postId: req.params.id,
+      accountId,
+      runtimeGraphId,
+      runtimeMissionId,
+      expectedTitle,
+      approvedBy
+    }
+  );
+  res.json({ ok: true, outcome: result.outcome, post: postStatusView(result.post) });
 }));
 
 router.post('/posts/:id/provider/reconcile', applicationRoute(async (req, res) => {
