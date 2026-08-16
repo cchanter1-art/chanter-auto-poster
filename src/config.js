@@ -223,7 +223,10 @@ module.exports = {
     // is on (the default), a job asking for public visibility is refused
     // before the provider is touched. Turning it off authorizes the public
     // path to exist — it never makes any job public by itself.
-    privateOnly: envInverseFlag('YOUTUBE_PRIVATE_ONLY', true),
+    privateOnly: envInverseFlag(
+      'YOUTUBE_PRIVATE_ONLY',
+      !Boolean(String(process.env.RUNTIME_CONTROL_TOKEN || '').trim())
+    ),
     requestTimeoutMs: Number(process.env.YOUTUBE_REQUEST_TIMEOUT_MS || 30_000),
     uploadTimeoutMs: Number(process.env.YOUTUBE_UPLOAD_TIMEOUT_MS || 15 * 60_000),
     // Matches the product's 250 MB intake limit (multer fileSize).
